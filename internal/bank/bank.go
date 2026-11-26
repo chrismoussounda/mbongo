@@ -21,8 +21,9 @@ import (
 )
 
 type (
-	Operator string
-	Kind     string
+	Operator    string
+	AccountKind string
+	Kind        string
 	Status   string
 	Reason   string
 )
@@ -30,6 +31,11 @@ type (
 const (
 	MTN    Operator = "mtn"
 	Airtel Operator = "airtel"
+
+	CustomerAccount AccountKind = "customer"
+	MerchantAccount AccountKind = "merchant"
+	// MintAccount is where opening balances come from.
+	MintAccount AccountKind = "mint"
 
 	Collection Kind = "collection"
 	Payout     Kind = "payout"
@@ -57,7 +63,7 @@ var (
 type Account struct {
 	ID       int64
 	Operator Operator
-	Kind     string
+	Kind     AccountKind
 	Name     string
 	Currency string
 	Balance  int64
@@ -166,14 +172,14 @@ func (b *Bank) inTx(ctx context.Context, f func(*sql.Tx) error) error {
 }
 
 func (b *Bank) OpenCustomer(ctx context.Context, op Operator, phone, currency string, balance int64) (Account, error) {
-	return b.openAccount(ctx, op, "customer", phone, currency, balance)
+	return b.openAccount(ctx, op, CustomerAccount, phone, currency, balance)
 }
 
 func (b *Bank) OpenMerchant(ctx context.Context, op Operator, name, currency string, balance int64) (Account, error) {
-	return b.openAccount(ctx, op, "merchant", name, currency, balance)
+	return b.openAccount(ctx, op, MerchantAccount, name, currency, balance)
 }
 
-func (b *Bank) openAccount(ctx context.Context, op Operator, kind, name, currency string, balance int64) (Account, error) {
+func (b *Bank) openAccount(ctx context.Context, op Operator, kind AccountKind, name, currency string, balance int64) (Account, error) {
 	if name == "" || currency == "" || balance < 0 {
 		return Account{}, ErrInvalid
 	}

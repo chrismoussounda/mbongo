@@ -88,6 +88,9 @@ func TestOpeningBalancesComeFromSomewhere(t *testing.T) {
 	if f.balance(c) != 10_000 || f.balance(m) != 0 {
 		t.Fatalf("balances %d %d", f.balance(c), f.balance(m))
 	}
+	if c.Kind != bank.CustomerAccount || m.Kind != bank.MerchantAccount {
+		t.Fatalf("kinds %s %s", c.Kind, m.Kind)
+	}
 	f.check()
 }
 
