@@ -14,6 +14,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/chrismoussounda/mbongo/internal/bank"
+	"github.com/chrismoussounda/mbongo/internal/clock"
 	"github.com/chrismoussounda/mbongo/internal/server"
 )
 
@@ -31,9 +33,19 @@ func main() {
 
 func run(ctx context.Context, getenv func(string) string, out io.Writer) error {
 	logger := slog.New(slog.NewJSONHandler(out, nil))
+	path := getenv("MBONGO_DB")
+	if path == "" {
+		path = "mbongo.db"
+	}
+	books, err := bank.Open(ctx, path, clock.Real{})
+	if err != nil {
+		return fmt.Errorf("open %s: %w", path, err)
+	}
+	defer func() { _ = books.Close() }()
+
 	srv := &http.Server{
 		Addr:              address(getenv),
-		Handler:           server.New(logger, version),
+		Handler:           server.New(logger, version, books),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
 		// Long enough for the slow answers Mbongo will fake on purpose.

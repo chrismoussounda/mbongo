@@ -1,7 +1,9 @@
 package server_test
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -11,8 +13,22 @@ import (
 	"github.com/chrismoussounda/mbongo/internal/server"
 )
 
+type pinger struct{ err error }
+
+func (p pinger) Ping(context.Context) error { return p.err }
+
 func newServer() http.Handler {
-	return server.New(slog.New(slog.NewTextHandler(io.Discard, nil)), "test")
+	return server.New(slog.New(slog.NewTextHandler(io.Discard, nil)), "test", pinger{})
+}
+
+func TestHealthFailsWhenStorageIsDown(t *testing.T) {
+	h := server.New(slog.New(slog.NewTextHandler(io.Discard, nil)), "test", pinger{errors.New("gone")})
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/healthz", nil))
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503", rec.Code)
+	}
 }
 
 func TestHealthSaysOK(t *testing.T) {

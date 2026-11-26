@@ -2,21 +2,32 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
 	"time"
 )
 
+// Pinger reports whether storage answers.
+type Pinger interface {
+	Ping(ctx context.Context) error
+}
+
 // New returns the whole HTTP handler.
-func New(logger *slog.Logger, version string) http.Handler {
+func New(logger *slog.Logger, version string, store Pinger) http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /healthz", health(version))
+	mux.HandleFunc("GET /healthz", health(logger, version, store))
 	return Recover(logger)(logRequests(logger, mux))
 }
 
-func health(version string) http.HandlerFunc {
-	return func(w http.ResponseWriter, _ *http.Request) {
+func health(logger *slog.Logger, version string, store Pinger) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if err := store.Ping(r.Context()); err != nil {
+			logger.Error("storage unreachable", "err", err)
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"status": "storage unreachable", "version": version})
+			return
+		}
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "version": version})
 	}
 }

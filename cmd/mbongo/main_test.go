@@ -5,6 +5,7 @@ import (
 	"context"
 	"net"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -41,7 +42,7 @@ func freeAddr(t *testing.T) string {
 
 func TestRunServesThenStopsCleanly(t *testing.T) {
 	addr := freeAddr(t)
-	env := map[string]string{"MBONGO_ADDR": addr}
+	env := map[string]string{"MBONGO_ADDR": addr, "MBONGO_DB": filepath.Join(t.TempDir(), "m.db")}
 	var logs safeBuffer
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
@@ -84,7 +85,7 @@ func TestRunFailsWhenTheAddressIsTaken(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = l.Close() }()
-	env := map[string]string{"MBONGO_ADDR": l.Addr().String()}
+	env := map[string]string{"MBONGO_ADDR": l.Addr().String(), "MBONGO_DB": filepath.Join(t.TempDir(), "m.db")}
 
 	err = run(context.Background(), func(k string) string { return env[k] }, &safeBuffer{})
 	if err == nil {
@@ -105,5 +106,12 @@ func TestAddress(t *testing.T) {
 		if got := address(func(k string) string { return c.env[k] }); got != c.want {
 			t.Errorf("address(%v) = %q, want %q", c.env, got, c.want)
 		}
+	}
+}
+
+func TestRunFailsWhenTheDatabaseCannotOpen(t *testing.T) {
+	env := map[string]string{"MBONGO_ADDR": freeAddr(t), "MBONGO_DB": filepath.Join(t.TempDir(), "missing", "m.db")}
+	if err := run(context.Background(), func(k string) string { return env[k] }, &safeBuffer{}); err == nil {
+		t.Fatal("run returned nil with an unusable database path")
 	}
 }

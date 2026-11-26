@@ -121,6 +121,8 @@ func Open(ctx context.Context, path string, c clock.Clock) (*Bank, error) {
 
 func (b *Bank) Close() error { return b.db.Close() }
 
+func (b *Bank) Ping(ctx context.Context) error { return b.db.PingContext(ctx) }
+
 func (b *Bank) migrate(ctx context.Context) error {
 	var version int
 	if err := b.db.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil {
