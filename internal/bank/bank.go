@@ -9,6 +9,8 @@ import (
 	_ "embed"
 	"errors"
 	"fmt"
+	"net/url"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -105,8 +107,7 @@ const schemaVersion = 1
 
 // Open opens or creates the database at path.
 func Open(ctx context.Context, path string, c clock.Clock) (*Bank, error) {
-	dsn := "file:" + path + "?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)"
-	db, err := sql.Open("sqlite", dsn)
+	db, err := sql.Open("sqlite", dsn(path))
 	if err != nil {
 		return nil, err
 	}
@@ -118,6 +119,13 @@ func Open(ctx context.Context, path string, c clock.Clock) (*Bank, error) {
 		return nil, err
 	}
 	return b, nil
+}
+
+// dsn escapes the path, so a file name with a space, # or % stays one file name.
+func dsn(path string) string {
+	u := url.URL{Scheme: "file", Opaque: (&url.URL{Path: filepath.ToSlash(path)}).EscapedPath()}
+	u.RawQuery = "_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)"
+	return u.String()
 }
 
 func (b *Bank) Close() error { return b.db.Close() }
