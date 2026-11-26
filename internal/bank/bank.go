@@ -303,11 +303,7 @@ func (b *Bank) Request(ctx context.Context, r Request) (Transaction, error) {
 // Approve moves the money, or fails the transaction when the payer is short.
 func (b *Bank) Approve(ctx context.Context, id string) (Transaction, error) {
 	var t Transaction
-	err := b.inTx(ctx, func(tx *sql.Tx) error {
-		var err error
-		if t, err = b.pending(ctx, tx, id); err != nil {
-			return err
-		}
+	err := b.decideTx(ctx, id, &t, func(tx *sql.Tx) error {
 		from, to := t.CustomerID, t.MerchantID
 		if t.Kind == Payout {
 			from, to = to, from
@@ -330,25 +326,72 @@ func (b *Bank) Approve(ctx context.Context, id string) (Transaction, error) {
 // Refuse fails a pending transaction without moving money.
 func (b *Bank) Refuse(ctx context.Context, id string, reason Reason) (Transaction, error) {
 	var t Transaction
-	err := b.inTx(ctx, func(tx *sql.Tx) error {
-		var err error
-		if t, err = b.pending(ctx, tx, id); err != nil {
-			return err
-		}
+	err := b.decideTx(ctx, id, &t, func(tx *sql.Tx) error {
 		return b.decide(ctx, tx, &t, Failed, reason)
 	})
 	return t, err
 }
 
-func (b *Bank) pending(ctx context.Context, tx *sql.Tx, id string) (Transaction, error) {
-	t, err := b.load(ctx, tx, "t.id = ?", id)
+// decideTx records due expiries, loads the transaction and runs f on it while it is
+// still pending. A transaction already decided returns ErrDecided, and the expiries
+// found on the way are kept.
+func (b *Bank) decideTx(ctx context.Context, id string, t *Transaction, f func(*sql.Tx) error) error {
+	decided := false
+	err := b.inTx(ctx, func(tx *sql.Tx) error {
+		if _, err := b.expireDue(ctx, tx); err != nil {
+			return err
+		}
+		var err error
+		if *t, err = b.load(ctx, tx, "t.id = ?", id); err != nil {
+			return err
+		}
+		if t.Status != Pending {
+			decided = true
+			return nil
+		}
+		return f(tx)
+	})
+	if err == nil && decided {
+		return ErrDecided
+	}
+	return err
+}
+
+// ExpireDue records every pending transaction whose window has closed as expired,
+// as of the end of its window. Reads already show them expired; this makes it last.
+func (b *Bank) ExpireDue(ctx context.Context) (int64, error) {
+	var n int64
+	err := b.inTx(ctx, func(tx *sql.Tx) error {
+		var err error
+		n, err = b.expireDue(ctx, tx)
+		return err
+	})
+	return n, err
+}
+
+func (b *Bank) expireDue(ctx context.Context, tx *sql.Tx) (int64, error) {
+	res, err := tx.ExecContext(ctx, `UPDATE transactions SET status = 'expired', decided_at = expires_at
+		WHERE status = 'pending' AND expires_at <= ?`, stamp(b.clock.Now()))
 	if err != nil {
-		return t, err
+		return 0, err
 	}
-	if t.Status != Pending {
-		return t, ErrDecided
+	return res.RowsAffected()
+}
+
+// Sweep calls ExpireDue every interval until ctx ends.
+func (b *Bank) Sweep(ctx context.Context, every time.Duration, onError func(error)) {
+	ticker := time.NewTicker(every)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if _, err := b.ExpireDue(ctx); err != nil && ctx.Err() == nil {
+				onError(err)
+			}
+		}
 	}
-	return t, nil
 }
 
 func (b *Bank) decide(ctx context.Context, tx *sql.Tx, t *Transaction, s Status, r Reason) error {
@@ -369,21 +412,20 @@ func (b *Bank) ByPartnerRef(ctx context.Context, op Operator, merchant, ref stri
 }
 
 func (b *Bank) find(ctx context.Context, where string, args ...any) (Transaction, error) {
-	var t Transaction
-	err := b.inTx(ctx, func(tx *sql.Tx) error {
-		var err error
-		t, err = b.load(ctx, tx, where, args...)
-		return err
-	})
-	return t, err
+	return b.load(ctx, b.db, where, args...)
 }
 
-// load reads one transaction, expiring it first if its window has passed.
-func (b *Bank) load(ctx context.Context, tx *sql.Tx, where string, args ...any) (Transaction, error) {
+type querier interface {
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
+
+// load reads one transaction. A pending one whose window has closed is shown as
+// expired even before ExpireDue records it.
+func (b *Bank) load(ctx context.Context, q querier, where string, args ...any) (Transaction, error) {
 	var t Transaction
 	var created, expires string
 	var decided sql.NullString
-	err := tx.QueryRowContext(ctx, `SELECT t.id, t.operator, t.kind, t.merchant_id, t.customer_id,
+	err := q.QueryRowContext(ctx, `SELECT t.id, t.operator, t.kind, t.merchant_id, t.customer_id,
 		c.name, t.amount, t.currency, t.partner_ref, t.external_id, t.status, t.reason,
 		t.created_at, t.expires_at, t.decided_at
 		FROM transactions t JOIN accounts m ON m.id = t.merchant_id JOIN accounts c ON c.id = t.customer_id
@@ -396,17 +438,19 @@ func (b *Bank) load(ctx context.Context, tx *sql.Tx, where string, args ...any) 
 	if err != nil {
 		return t, err
 	}
-	t.CreatedAt, t.ExpiresAt = parse(created), parse(expires)
+	if t.CreatedAt, err = parse(created); err != nil {
+		return t, err
+	}
+	if t.ExpiresAt, err = parse(expires); err != nil {
+		return t, err
+	}
 	if decided.Valid {
-		t.DecidedAt = parse(decided.String)
+		if t.DecidedAt, err = parse(decided.String); err != nil {
+			return t, err
+		}
 	}
 	if t.Status == Pending && !b.clock.Now().Before(t.ExpiresAt) {
 		t.Status, t.DecidedAt = Expired, t.ExpiresAt
-		if _, err := tx.ExecContext(ctx,
-			"UPDATE transactions SET status = 'expired', decided_at = ? WHERE id = ?",
-			stamp(t.DecidedAt), t.ID); err != nil {
-			return t, err
-		}
 	}
 	return t, nil
 }
@@ -456,11 +500,17 @@ func newID() string {
 	return rand.Text()
 }
 
-func stamp(t time.Time) string { return t.UTC().Format(time.RFC3339Nano) }
+// stampLayout has a fixed width, so SQLite can compare times as text.
+const stampLayout = "2006-01-02T15:04:05.000000000Z"
 
-func parse(s string) time.Time {
-	t, _ := time.Parse(time.RFC3339Nano, s)
-	return t
+func stamp(t time.Time) string { return t.UTC().Format(stampLayout) }
+
+func parse(s string) (time.Time, error) {
+	t, err := time.Parse(stampLayout, s)
+	if err != nil {
+		return t, fmt.Errorf("bank: bad time %q in the database: %w", s, err)
+	}
+	return t, nil
 }
 
 func isUnique(err error) bool {

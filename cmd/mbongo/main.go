@@ -43,6 +43,14 @@ func run(ctx context.Context, getenv func(string) string, out io.Writer) error {
 	}
 	defer func() { _ = books.Close() }()
 
+	sweepCtx, stopSweep := context.WithCancel(ctx)
+	swept := make(chan struct{})
+	go func() {
+		defer close(swept)
+		books.Sweep(sweepCtx, time.Second, func(err error) { logger.Error("expiry sweep", "err", err) })
+	}()
+	defer func() { stopSweep(); <-swept }()
+
 	srv := &http.Server{
 		Addr:              address(getenv),
 		Handler:           server.New(logger, version, books),
