@@ -1,5 +1,6 @@
 // Package bank keeps the fake operators' wallets and the money moving between them.
 // Every movement is a set of entries that adds up to zero, so no franc is created or lost.
+// Amounts are whole numbers of the currency's smallest unit: francs, or euro cents.
 package bank
 
 import (
@@ -18,14 +19,15 @@ import (
 	sqlite3 "modernc.org/sqlite/lib"
 
 	"github.com/chrismoussounda/mbongo/internal/clock"
+	"github.com/chrismoussounda/mbongo/internal/money"
 )
 
 type (
 	Operator    string
 	AccountKind string
 	Kind        string
-	Status   string
-	Reason   string
+	Status      string
+	Reason      string
 )
 
 const (
@@ -180,8 +182,11 @@ func (b *Bank) OpenMerchant(ctx context.Context, op Operator, name, currency str
 }
 
 func (b *Bank) openAccount(ctx context.Context, op Operator, kind AccountKind, name, currency string, balance int64) (Account, error) {
-	if name == "" || currency == "" || balance < 0 {
+	if name == "" || balance < 0 {
 		return Account{}, ErrInvalid
+	}
+	if !money.Known(currency) {
+		return Account{}, ErrCurrency
 	}
 	a := Account{Operator: op, Kind: kind, Name: name, Currency: currency}
 	err := b.inTx(ctx, func(tx *sql.Tx) error {
@@ -257,6 +262,9 @@ func (b *Bank) Account(ctx context.Context, id int64) (Account, error) {
 func (b *Bank) Request(ctx context.Context, r Request) (Transaction, error) {
 	if r.Amount <= 0 || r.PartnerRef == "" || (r.Kind != Collection && r.Kind != Payout) {
 		return Transaction{}, ErrInvalid
+	}
+	if !money.Known(r.Currency) {
+		return Transaction{}, ErrCurrency
 	}
 	if r.Window == 0 {
 		r.Window = 5 * time.Minute

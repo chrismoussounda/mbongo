@@ -274,6 +274,14 @@ func TestRequestIsValidated(t *testing.T) {
 	if !errors.Is(err, bank.ErrCurrency) {
 		t.Fatalf("err = %v, want ErrCurrency", err)
 	}
+	if _, err := f.bank.OpenCustomer(f.ctx, bank.MTN, "242068888888", "ZZZ", 0); !errors.Is(err, bank.ErrCurrency) {
+		t.Fatalf("unknown currency account: %v", err)
+	}
+	_, err = f.bank.Request(f.ctx, bank.Request{Kind: bank.Collection, Operator: bank.MTN,
+		Merchant: "shop", Phone: "242061234567", Amount: 1, Currency: "ZZZ", PartnerRef: "r"})
+	if !errors.Is(err, bank.ErrCurrency) {
+		t.Fatalf("unknown currency request: %v", err)
+	}
 	if _, err := f.bank.OpenCustomer(f.ctx, bank.MTN, "242069999999", "EUR", 100); err != nil {
 		t.Fatal(err)
 	}
