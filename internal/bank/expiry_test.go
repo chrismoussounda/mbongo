@@ -34,8 +34,9 @@ func TestReadingDoesNotWrite(t *testing.T) {
 	tx, _ := f.request(bank.Collection, "ref-1", 2_500)
 	f.clock.Advance(time.Hour)
 
-	if got, _ := f.bank.Transaction(f.ctx, tx.ID); got.Status != bank.Expired {
-		t.Fatalf("shown as %s", got.Status)
+	got, _ := f.bank.Transaction(f.ctx, tx.ID)
+	if got.Status != bank.Expired || !got.DecidedAt.Equal(tx.ExpiresAt) {
+		t.Fatalf("shown as %s at %v", got.Status, got.DecidedAt)
 	}
 	if s := f.storedStatus(tx.ID); s != "pending" {
 		t.Fatalf("a read stored %s", s)
@@ -122,5 +123,16 @@ func TestBadTimeInTheDatabaseIsAnError(t *testing.T) {
 
 	if _, err := f.bank.Transaction(f.ctx, tx.ID); err == nil {
 		t.Fatal("a broken date was read without an error")
+	}
+}
+
+func TestExpireDueAtTheExactEnd(t *testing.T) {
+	f := setup(t)
+	f.customer("242061234567", 10_000)
+	f.merchant("shop", 0)
+	_, _ = f.request(bank.Collection, "ref-1", 2_500)
+	f.clock.Advance(5 * time.Minute)
+	if n, err := f.bank.ExpireDue(f.ctx); err != nil || n != 1 {
+		t.Fatalf("expired %d, %v", n, err)
 	}
 }
