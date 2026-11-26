@@ -16,12 +16,13 @@ early. At the end, it tells you what your app got wrong.
 
 ## Status
 
-Early work. Today it is only a server with a health check.
+Early work. Today it is a server with a health check and the books behind it: wallets,
+payments that wait for approval or expire, and entries that always add up to zero.
 
 | Step | What | State |
 | --- | --- | --- |
 | 1 | Server, CI, Docker image | done |
-| 2 | Wallets, transactions, a clock you can move | |
+| 2 | Wallets, transactions, a clock you can move | done |
 | 3 | MTN collections | |
 | 4 | MTN payouts | |
 | 5 | Airtel Money | |
@@ -46,7 +47,8 @@ docker build -t mbongo .
 docker run --rm -p 8080:8080 mbongo
 ```
 
-`PORT` or `MBONGO_ADDR` changes the address.
+`PORT` or `MBONGO_ADDR` changes the address. `MBONGO_DB` is the SQLite file (`mbongo.db` by default,
+`/data/mbongo.db` in the image).
 
 ## How close to the real thing
 
