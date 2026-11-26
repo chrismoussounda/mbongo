@@ -1,0 +1,7 @@
+/mbongo
+/mbongo.exe
+/bin/
+*.db
+*.db-*
+coverage.out
+.env
