@@ -12,7 +12,8 @@ import (
 	"strings"
 	"time"
 
-	_ "modernc.org/sqlite" // registers the "sqlite" driver
+	"modernc.org/sqlite"
+	sqlite3 "modernc.org/sqlite/lib"
 
 	"github.com/chrismoussounda/mbongo/internal/clock"
 )
@@ -455,5 +456,6 @@ func parse(s string) time.Time {
 }
 
 func isUnique(err error) bool {
-	return err != nil && strings.Contains(err.Error(), "UNIQUE constraint failed")
+	var e *sqlite.Error
+	return errors.As(err, &e) && e.Code() == sqlite3.SQLITE_CONSTRAINT_UNIQUE
 }
