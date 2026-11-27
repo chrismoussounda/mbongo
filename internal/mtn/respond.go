@@ -1,6 +1,8 @@
 package mtn
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"regexp"
@@ -26,9 +28,10 @@ var uuidV4 = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-
 func isUUID(s string) bool { return uuidV4.MatchString(s) }
 
 func newUUID() string {
-	h := []byte(randomHex())
-	h[12] = '4'
-	h[16] = "89ab"[h[16]%4]
-	s := string(h)
-	return s[:8] + "-" + s[8:12] + "-" + s[12:16] + "-" + s[16:20] + "-" + s[20:]
+	b := make([]byte, 16)
+	_, _ = rand.Read(b)
+	b[6] = b[6]&0x0f | 0x40 // version 4
+	b[8] = b[8]&0x3f | 0x80 // RFC 9562 variant
+	h := hex.EncodeToString(b)
+	return h[:8] + "-" + h[8:12] + "-" + h[12:16] + "-" + h[16:20] + "-" + h[20:]
 }

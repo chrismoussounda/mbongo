@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"database/sql"
+	"encoding/hex"
 	"errors"
 	"time"
 
@@ -238,10 +239,5 @@ func (s *store) markNotified(ctx context.Context, user, ref string) (bool, error
 func randomHex() string {
 	b := make([]byte, 16)
 	_, _ = rand.Read(b)
-	const hex = "0123456789abcdef"
-	out := make([]byte, 32)
-	for i, c := range b {
-		out[2*i], out[2*i+1] = hex[c>>4], hex[c&15]
-	}
-	return string(out)
+	return hex.EncodeToString(b)
 }
