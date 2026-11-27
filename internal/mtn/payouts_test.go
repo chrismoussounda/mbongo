@@ -35,7 +35,7 @@ func TestSandboxTransferPaysAtOnce(t *testing.T) {
 		t.Fatalf("transfer: %d %v", a.status, a.body)
 	}
 	s := d.get("/disbursement/v1_0/transfer/" + ref1)
-	want := "amount,currency,externalId,financialTransactionId,payee,status"
+	want := "amount,currency,externalId,financialTransactionId,payee,payeeNote,payerMessage,status"
 	if s.body["status"] != "SUCCESSFUL" || keys(s.body) != want {
 		t.Fatalf("status %v, fields %s", s.body["status"], keys(s.body))
 	}
@@ -66,13 +66,15 @@ func TestATransferIgnoresAReferenceToRefund(t *testing.T) {
 	}
 }
 
-func TestDepositEchoesTheMessages(t *testing.T) {
+func TestPayoutsEchoTheMessages(t *testing.T) {
 	e := setup(t)
 	d := e.user("disbursement", "sandbox")
-	_ = d.post("deposit", ref1, send("46733123453", "5", "EUR"))
-	s := d.get("/disbursement/v1_0/deposit/" + ref1)
-	if s.body["status"] != "SUCCESSFUL" || s.body["payerMessage"] != "Salaire" || s.body["payeeNote"] != "Novembre" {
-		t.Fatalf("%v", s.body)
+	for op, ref := range map[string]string{"transfer": ref1, "deposit": ref2} {
+		_ = d.post(op, ref, send("46733123453", "5", "EUR"))
+		s := d.get("/disbursement/v1_0/" + op + "/" + ref)
+		if s.body["status"] != "SUCCESSFUL" || s.body["payerMessage"] != "Salaire" || s.body["payeeNote"] != "Novembre" {
+			t.Fatalf("%s: %v", op, s.body)
+		}
 	}
 }
 
@@ -162,7 +164,7 @@ func TestRefundGoesBackToThePayer(t *testing.T) {
 	}
 	s := d.get("/disbursement/v1_0/refund/" + ref2)
 	payee, _ := s.body["payee"].(map[string]any)
-	if s.body["status"] != "SUCCESSFUL" || payee["partyId"] != "46733123453" || s.body["payerMessage"] != nil {
+	if s.body["status"] != "SUCCESSFUL" || payee["partyId"] != "46733123453" || s.body["payerMessage"] != "Remboursement" {
 		t.Fatalf("%v", s.body)
 	}
 	if a := d.post("refund", ref3, refund(ref1, "5.01")); a.status != 400 || a.body["code"] != "NOT_ALLOWED" {

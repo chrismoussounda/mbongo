@@ -24,8 +24,6 @@ type operation struct {
 	product string
 	kind    bank.Kind
 	party   string
-	// messages: whether the status echoes payerMessage and payeeNote (sdk: not for transfers or refunds).
-	messages bool
 	// approval: whether the customer has to say yes, or MTN executes at once.
 	approval bool
 }
@@ -41,9 +39,9 @@ func operationNamed(name string) (operation, error) {
 
 var (
 	opRequestToPay = operation{name: "requesttopay", product: collection, kind: bank.Collection, party: "payer",
-		messages: true, approval: true}
+		approval: true}
 	opTransfer = operation{name: "transfer", product: disbursement, kind: bank.Payout, party: "payee"}
-	opDeposit  = operation{name: "deposit", product: disbursement, kind: bank.Payout, party: "payee", messages: true}
+	opDeposit  = operation{name: "deposit", product: disbursement, kind: bank.Payout, party: "payee"}
 	opRefund   = operation{name: "refund", product: disbursement, kind: bank.Payout, party: "payee"}
 )
 
@@ -297,8 +295,8 @@ type paymentStatus struct {
 	ExternalID             string  `json:"externalId"`
 	Payer                  *party  `json:"payer,omitempty"`
 	Payee                  *party  `json:"payee,omitempty"`
-	PayerMessage           *string `json:"payerMessage,omitempty"`
-	PayeeNote              *string `json:"payeeNote,omitempty"`
+	PayerMessage           string  `json:"payerMessage"`
+	PayeeNote              string  `json:"payeeNote"`
 	Status                 string  `json:"status"`
 	Reason                 *reason `json:"reason,omitempty"`
 }
@@ -317,15 +315,13 @@ func (r reason) MarshalJSON() ([]byte, error) {
 }
 
 func (s *Service) statusBody(ctx context.Context, u apiUser, op operation, req request) (paymentStatus, error) {
-	body := paymentStatus{Amount: req.Amount, Currency: req.Currency, ExternalID: req.ExternalID, Status: "FAILED"}
+	body := paymentStatus{Amount: req.Amount, Currency: req.Currency, ExternalID: req.ExternalID,
+		PayerMessage: req.PayerMessage, PayeeNote: req.PayeeNote, Status: "FAILED"}
 	customer := &party{PartyIDType: "MSISDN", PartyID: req.PartyID}
 	if op.party == "payer" {
 		body.Payer = customer
 	} else {
 		body.Payee = customer
-	}
-	if op.messages {
-		body.PayerMessage, body.PayeeNote = &req.PayerMessage, &req.PayeeNote
 	}
 	code := req.Failure
 	if req.TransactionID.Valid {
