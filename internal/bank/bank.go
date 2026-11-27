@@ -89,7 +89,7 @@ type Transaction struct {
 	DecidedAt  time.Time
 }
 
-// Request asks for money to move. Nothing moves until the transaction is approved.
+// Nothing moves until the transaction is approved.
 type Request struct {
 	Kind       Kind
 	Operator   Operator
@@ -99,7 +99,7 @@ type Request struct {
 	Currency   string
 	PartnerRef string
 	ExternalID string
-	// Window is how long the transaction may stay pending. Zero means five minutes.
+	// Zero means five minutes.
 	Window time.Duration
 }
 
@@ -113,7 +113,6 @@ var schema string
 
 const schemaVersion = 1
 
-// Open opens or creates the database at path.
 func Open(ctx context.Context, path string, c clock.Clock) (*Bank, error) {
 	db, err := sql.Open("sqlite", dsn(path))
 	if err != nil {
@@ -139,6 +138,11 @@ func dsn(path string) string {
 func (b *Bank) Close() error { return b.db.Close() }
 
 func (b *Bank) Ping(ctx context.Context) error { return b.db.PingContext(ctx) }
+
+// DB lets the operator packages keep their own tables in the same file.
+func (b *Bank) DB() *sql.DB { return b.db }
+
+func (b *Bank) Clock() clock.Clock { return b.clock }
 
 func (b *Bank) migrate(ctx context.Context) error {
 	var version int
@@ -215,7 +219,7 @@ func (b *Bank) openAccount(ctx context.Context, op Operator, kind AccountKind, n
 	return a, err
 }
 
-// mint is where opening balances come from. Its balance is minus all the money in circulation.
+// The mint's balance is minus all the money in circulation.
 func (b *Bank) mint(ctx context.Context, tx *sql.Tx, op Operator, currency string) (int64, error) {
 	if _, err := tx.ExecContext(ctx, `INSERT INTO accounts (operator, kind, name, currency, balance)
 		VALUES (?, 'mint', 'mint', ?, 0) ON CONFLICT DO NOTHING`, op, currency); err != nil {
@@ -258,7 +262,17 @@ func (b *Bank) Account(ctx context.Context, id int64) (Account, error) {
 	return a, err
 }
 
-// Request records a pending transaction.
+func (b *Bank) FindAccount(ctx context.Context, op Operator, kind AccountKind, name, currency string) (Account, error) {
+	var a Account
+	err := b.db.QueryRowContext(ctx, `SELECT id, operator, kind, name, currency, balance FROM accounts
+		WHERE operator = ? AND kind = ? AND name = ? AND currency = ?`, op, kind, name, currency).
+		Scan(&a.ID, &a.Operator, &a.Kind, &a.Name, &a.Currency, &a.Balance)
+	if errors.Is(err, sql.ErrNoRows) {
+		return a, ErrNotFound
+	}
+	return a, err
+}
+
 func (b *Bank) Request(ctx context.Context, r Request) (Transaction, error) {
 	if r.Amount <= 0 || r.PartnerRef == "" || (r.Kind != Collection && r.Kind != Payout) {
 		return Transaction{}, ErrInvalid
@@ -314,7 +328,7 @@ func (b *Bank) Request(ctx context.Context, r Request) (Transaction, error) {
 	return t, nil
 }
 
-// Approve moves the money, or fails the transaction when the payer is short.
+// Approve fails the transaction instead when the payer is short.
 func (b *Bank) Approve(ctx context.Context, id string) (Transaction, error) {
 	var t Transaction
 	err := b.decideTx(ctx, id, &t, func(tx *sql.Tx) error {
@@ -337,7 +351,6 @@ func (b *Bank) Approve(ctx context.Context, id string) (Transaction, error) {
 	return t, err
 }
 
-// Refuse fails a pending transaction without moving money.
 func (b *Bank) Refuse(ctx context.Context, id string, reason Reason) (Transaction, error) {
 	var t Transaction
 	err := b.decideTx(ctx, id, &t, func(tx *sql.Tx) error {
@@ -371,8 +384,8 @@ func (b *Bank) decideTx(ctx context.Context, id string, t *Transaction, f func(*
 	return err
 }
 
-// ExpireDue records every pending transaction whose window has closed as expired,
-// as of the end of its window. Reads already show them expired; this makes it last.
+// Reads already show overdue transactions as expired; ExpireDue stores it, dated at the
+// end of each window.
 func (b *Bank) ExpireDue(ctx context.Context) (int64, error) {
 	var n int64
 	err := b.inTx(ctx, func(tx *sql.Tx) error {
@@ -392,7 +405,6 @@ func (b *Bank) expireDue(ctx context.Context, tx *sql.Tx) (int64, error) {
 	return res.RowsAffected()
 }
 
-// Sweep calls ExpireDue every interval until ctx ends.
 func (b *Bank) Sweep(ctx context.Context, every time.Duration, onError func(error)) {
 	ticker := time.NewTicker(every)
 	defer ticker.Stop()
@@ -420,7 +432,6 @@ func (b *Bank) Transaction(ctx context.Context, id string) (Transaction, error) 
 	return b.find(ctx, "t.id = ?", id)
 }
 
-// ByPartnerRef finds a transaction by the reference the merchant chose.
 func (b *Bank) ByPartnerRef(ctx context.Context, op Operator, merchant, ref string) (Transaction, error) {
 	return b.find(ctx, "t.operator = ? AND m.name = ? AND t.partner_ref = ?", op, merchant, ref)
 }
@@ -433,8 +444,7 @@ type querier interface {
 	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
 }
 
-// load reads one transaction. A pending one whose window has closed is shown as
-// expired even before ExpireDue records it.
+// A pending transaction past its window is shown as expired before ExpireDue stores it.
 func (b *Bank) load(ctx context.Context, q querier, where string, args ...any) (Transaction, error) {
 	var t Transaction
 	var created, expires string
