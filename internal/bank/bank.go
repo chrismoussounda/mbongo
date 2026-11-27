@@ -19,6 +19,7 @@ import (
 	sqlite3 "modernc.org/sqlite/lib"
 
 	"github.com/chrismoussounda/mbongo/internal/clock"
+	"github.com/chrismoussounda/mbongo/internal/migrate"
 	"github.com/chrismoussounda/mbongo/internal/money"
 )
 
@@ -111,8 +112,6 @@ type Bank struct {
 //go:embed schema.sql
 var schema string
 
-const schemaVersion = 1
-
 func Open(ctx context.Context, path string, c clock.Clock) (*Bank, error) {
 	db, err := sql.Open("sqlite", dsn(path))
 	if err != nil {
@@ -121,7 +120,7 @@ func Open(ctx context.Context, path string, c clock.Clock) (*Bank, error) {
 	// One connection serialises every write, which is all a fake operator needs.
 	db.SetMaxOpenConns(1)
 	b := &Bank{db: db, clock: c}
-	if err := b.migrate(ctx); err != nil {
+	if err := migrate.Run(ctx, db, "bank", []string{schema}); err != nil {
 		_ = db.Close()
 		return nil, err
 	}
@@ -143,27 +142,6 @@ func (b *Bank) Ping(ctx context.Context) error { return b.db.PingContext(ctx) }
 func (b *Bank) DB() *sql.DB { return b.db }
 
 func (b *Bank) Clock() clock.Clock { return b.clock }
-
-func (b *Bank) migrate(ctx context.Context) error {
-	var version int
-	if err := b.db.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil {
-		return err
-	}
-	switch version {
-	case schemaVersion:
-		return nil
-	case 0:
-		return b.inTx(ctx, func(tx *sql.Tx) error {
-			if _, err := tx.ExecContext(ctx, schema); err != nil {
-				return err
-			}
-			_, err := tx.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version = %d", schemaVersion))
-			return err
-		})
-	default:
-		return fmt.Errorf("bank: database schema %d is newer than this program (%d)", version, schemaVersion)
-	}
-}
 
 func (b *Bank) inTx(ctx context.Context, f func(*sql.Tx) error) error {
 	tx, err := b.db.BeginTx(ctx, nil)
