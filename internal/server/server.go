@@ -12,9 +12,12 @@ type Pinger interface {
 	Ping(ctx context.Context) error
 }
 
-func New(logger *slog.Logger, version string, store Pinger) http.Handler {
+func New(logger *slog.Logger, version string, store Pinger, routes ...func(*http.ServeMux)) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", health(logger, version, store))
+	for _, add := range routes {
+		add(mux)
+	}
 	return logRequests(logger, Recover(logger)(mux))
 }
 

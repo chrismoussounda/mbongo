@@ -13,8 +13,10 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/chrismoussounda/mbongo/internal/admin"
 	"github.com/chrismoussounda/mbongo/internal/bank"
 	"github.com/chrismoussounda/mbongo/internal/clock"
+	"github.com/chrismoussounda/mbongo/internal/mtn"
 	"github.com/chrismoussounda/mbongo/internal/server"
 )
 
@@ -50,9 +52,17 @@ func run(ctx context.Context, getenv func(string) string, out io.Writer) error {
 	}()
 	defer func() { stopSweep(); <-swept }()
 
+	momo, err := mtn.New(ctx, books, logger)
+	if err != nil {
+		return err
+	}
+	defer momo.Wait()
+
 	srv := &http.Server{
-		Addr:              address(getenv),
-		Handler:           server.New(logger, version, books),
+		Addr: address(getenv),
+		Handler: server.New(logger, version, books, momo.Routes, func(mux *http.ServeMux) {
+			admin.Routes(mux, getenv("MBONGO_ADMIN_TOKEN"), books, momo, logger)
+		}),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
 		// Long enough for the slow answers Mbongo will fake on purpose.
