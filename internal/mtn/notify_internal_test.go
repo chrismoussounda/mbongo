@@ -20,12 +20,12 @@ func TestACallbackIsSentOnlyOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = books.Close() }()
-	s, err := New(ctx, books, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	var sent atomic.Int32
+	s, err := New(ctx, books, slog.New(slog.NewTextHandler(io.Discard, nil)),
+		func(context.Context, string, []byte) error { sent.Add(1); return nil })
 	if err != nil {
 		t.Fatal(err)
 	}
-	var sent atomic.Int32
-	s.Send = func(context.Context, string, []byte) error { sent.Add(1); return nil }
 	sub, _ := s.CreateSubscription(ctx, collection)
 	user, _, _ := s.CreateAPIUser(ctx, sub, "shop.example", MTNCongo)
 	req := request{APIUser: user, ReferenceID: "r", Product: collection, PartyID: "242061234567",

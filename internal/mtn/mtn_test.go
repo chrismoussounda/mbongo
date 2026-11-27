@@ -47,17 +47,17 @@ func setup(t *testing.T) *env {
 	if err != nil {
 		t.Fatal(err)
 	}
-	e.svc, err = mtn.New(e.ctx, e.books, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	e.svc, err = mtn.New(e.ctx, e.books, slog.New(slog.NewTextHandler(io.Discard, nil)),
+		func(_ context.Context, url string, body []byte) error {
+			var m map[string]any
+			_ = json.Unmarshal(body, &m)
+			e.mu.Lock()
+			e.callbacks = append(e.callbacks, callback{url, m})
+			e.mu.Unlock()
+			return nil
+		})
 	if err != nil {
 		t.Fatal(err)
-	}
-	e.svc.Send = func(_ context.Context, url string, body []byte) error {
-		var m map[string]any
-		_ = json.Unmarshal(body, &m)
-		e.mu.Lock()
-		e.callbacks = append(e.callbacks, callback{url, m})
-		e.mu.Unlock()
-		return nil
 	}
 	mux := http.NewServeMux()
 	e.svc.Routes(mux)

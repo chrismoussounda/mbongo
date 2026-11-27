@@ -35,18 +35,26 @@ type Service struct {
 	store  *store
 	books  *bank.Bank
 	logger *slog.Logger
+	send   Sender
 	sends  sync.WaitGroup
-	// Send delivers a callback. Tests replace it.
-	Send func(ctx context.Context, url string, body []byte) error
 }
 
-func New(ctx context.Context, books *bank.Bank, logger *slog.Logger) (*Service, error) {
+type Sender func(ctx context.Context, url string, body []byte) error
+
+// New sends callbacks with send, or by HTTP PUT when send is nil.
+func New(ctx context.Context, books *bank.Bank, logger *slog.Logger, send Sender) (*Service, error) {
 	st, err := newStore(ctx, books)
 	if err != nil {
 		return nil, err
 	}
-	client := &http.Client{Timeout: 10 * time.Second}
-	return &Service{store: st, books: books, logger: logger, Send: func(ctx context.Context, u string, body []byte) error {
+	if send == nil {
+		send = put(&http.Client{Timeout: 10 * time.Second})
+	}
+	return &Service{store: st, books: books, logger: logger, send: send}, nil
+}
+
+func put(client *http.Client) Sender {
+	return func(ctx context.Context, u string, body []byte) error {
 		req, err := http.NewRequestWithContext(ctx, http.MethodPut, u, bytes.NewReader(body))
 		if err != nil {
 			return err
@@ -57,7 +65,7 @@ func New(ctx context.Context, books *bank.Bank, logger *slog.Logger) (*Service, 
 			return err
 		}
 		return res.Body.Close()
-	}}, nil
+	}
 }
 
 func (s *Service) Routes(mux *http.ServeMux) {

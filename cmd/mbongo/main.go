@@ -52,7 +52,7 @@ func run(ctx context.Context, getenv func(string) string, out io.Writer) error {
 	}()
 	defer func() { stopSweep(); <-swept }()
 
-	momo, err := mtn.New(ctx, books, logger)
+	momo, err := mtn.New(ctx, books, logger, nil)
 	if err != nil {
 		return err
 	}

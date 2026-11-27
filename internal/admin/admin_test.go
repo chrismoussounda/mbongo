@@ -36,11 +36,10 @@ func setup(t *testing.T, token string) *env {
 		t.Fatal(err)
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	m, err := mtn.New(ctx, books, logger)
+	m, err := mtn.New(ctx, books, logger, func(context.Context, string, []byte) error { return nil })
 	if err != nil {
 		t.Fatal(err)
 	}
-	m.Send = func(context.Context, string, []byte) error { return nil }
 	mux := http.NewServeMux()
 	m.Routes(mux)
 	admin.Routes(mux, token, books, m, logger)

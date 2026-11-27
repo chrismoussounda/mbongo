@@ -34,7 +34,7 @@ func (s *Service) notify(req request) {
 			return
 		}
 		raw, _ := json.Marshal(body)
-		if err := s.Send(ctx, req.CallbackURL, raw); err != nil {
+		if err := s.send(ctx, req.CallbackURL, raw); err != nil {
 			s.logger.Info("callback not delivered, not retried", "ref", req.ReferenceID, "err", err)
 		}
 	})
