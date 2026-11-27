@@ -79,7 +79,8 @@ curl -X POST localhost:8080/_mbongo/mtn/<apiUser>/requests/<X-Reference-Id>/appr
 A payer who doesn't answer within five minutes lets the payment expire.
 
 **Payouts** (`transfer`, `deposit`, `refund`) need a `disbursement` subscription and API user of their
-own. In Congo, top up the account they're paid from first:
+own. Give both subscriptions the same `partner` (`{"product":"disbursement","partner":"my-shop"}`) so
+refunds can reach your collections. In Congo, top up the account payouts are paid from first:
 
 ```sh
 curl -X POST localhost:8080/_mbongo/mtn/<apiUser>/fund -H "Authorization: Bearer $MBONGO_ADMIN_TOKEN" \

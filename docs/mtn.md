@@ -17,7 +17,7 @@ Each behaviour is tagged with its source:
 | | `sandbox` | `mtncongo` |
 | --- | --- | --- |
 | Currency | EUR only (sdk, report) | XAF |
-| Payer | any number; a few test numbers fail on purpose (sdk) | must have a wallet, and approve (assumed) |
+| Payer | any number, always with enough money; a few test numbers fail on purpose (sdk) | must have a wallet, and approve (assumed) |
 | Failure reason in status | object `{code, message}` (sdk) | bare string (sdk: "since January 2024") |
 | API users | created through the API (docs) | created by Mbongo's admin API, like MTN's partner portal (assumed) |
 
@@ -64,7 +64,9 @@ Failure reasons in a FAILED status: `PAYER_NOT_FOUND`, `NOT_ENOUGH_FUNDS` (Congo
 
 ## Payouts (disbursement)
 
-A separate product, with its own subscription key, API user and token (docs).
+A separate product, with its own subscription key, API user and token (docs). Subscriptions created
+with the same `partner` belong to one business, as on MTN's partner portal, so its payouts can refund
+its collections (assumed).
 
 | Call | Answer | Source |
 | --- | --- | --- |
@@ -83,7 +85,7 @@ A separate product, with its own subscription key, API user and token (docs).
 - The sandbox test numbers fail or stay pending as for collections; a payee can't reject (assumed).
 - Open question: the SDK sends `payer` on a deposit, while its own deposit status fixture shows
   `payee`. Mbongo wants `payee` and answers 400 to `payer`, until a real sandbox settles it.
-- A refund needs a successful request to pay in the same environment (any API user), and all its
+- A refund needs a successful request to pay of the same partner, in the same environment, and all its
   refunds together can't pass the amount paid. Otherwise: 404 `RESOURCE_NOT_FOUND`, or 400
   `NOT_ALLOWED` (assumed).
 
