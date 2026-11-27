@@ -197,6 +197,30 @@ func (b *Bank) openAccount(ctx context.Context, op Operator, kind AccountKind, n
 	return a, err
 }
 
+// Fund adds money to an account from the mint, as a merchant topping up its payout account.
+func (b *Bank) Fund(ctx context.Context, id, amount int64) (Account, error) {
+	if amount <= 0 {
+		return Account{}, ErrInvalid
+	}
+	var a Account
+	err := b.inTx(ctx, func(tx *sql.Tx) error {
+		if err := tx.QueryRowContext(ctx, "SELECT id, operator, kind, name, currency, balance FROM accounts WHERE id = ?", id).
+			Scan(&a.ID, &a.Operator, &a.Kind, &a.Name, &a.Currency, &a.Balance); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return ErrNotFound
+			}
+			return err
+		}
+		mint, err := b.mint(ctx, tx, a.Operator, a.Currency)
+		if err != nil {
+			return err
+		}
+		a.Balance += amount
+		return b.move(ctx, tx, "", mint, a.ID, amount)
+	})
+	return a, err
+}
+
 // The mint's balance is minus all the money in circulation.
 func (b *Bank) mint(ctx context.Context, tx *sql.Tx, op Operator, currency string) (int64, error) {
 	if _, err := tx.ExecContext(ctx, `INSERT INTO accounts (operator, kind, name, currency, balance)

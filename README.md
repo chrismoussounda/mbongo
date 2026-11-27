@@ -16,15 +16,15 @@ early. At the end, it tells you what your app got wrong.
 
 ## Status
 
-Early work. MTN's collection API works, in its sandbox flavour and its Congo flavour, on top of
-books where every movement adds up to zero. Failures on demand come in step 6.
+Early work. MTN's collection and payout APIs work, in their sandbox flavour and their Congo flavour,
+on top of books where every movement adds up to zero. Failures on demand come in step 6.
 
 | Step | What | State |
 | --- | --- | --- |
 | 1 | Server, CI, Docker image | done |
 | 2 | Wallets, transactions, a clock you can move | done |
 | 3 | MTN collections | done |
-| 4 | MTN payouts | |
+| 4 | MTN payouts | done |
 | 5 | Airtel Money | |
 | 6 | Failures on demand | |
 | 7 | A phone page to approve or ignore payments | |
@@ -78,11 +78,22 @@ curl -X POST localhost:8080/_mbongo/mtn/<apiUser>/requests/<X-Reference-Id>/appr
 
 A payer who doesn't answer within five minutes lets the payment expire.
 
+**Payouts** (`transfer`, `deposit`, `refund`) need a `disbursement` subscription and API user of their
+own. Give both subscriptions the same `partner` (`{"product":"disbursement","partner":"my-shop"}`) so
+refunds can reach your collections. In Congo, top up the account payouts are paid from first:
+
+```sh
+curl -X POST localhost:8080/_mbongo/mtn/<apiUser>/fund -H "Authorization: Bearer $MBONGO_ADMIN_TOKEN" \
+  -d '{"amount":"250000"}'
+```
+
 ## How close to the real thing
 
 Every behaviour says where it comes from: the operator's documentation, a public SDK, a developer's
-report, or an assumption. See [docs/mtn-collection.md](docs/mtn-collection.md). The
-[lepresk/momo-api](https://github.com/lepresk/momo-api) client runs against Mbongo without changes.
+report, or an assumption. For MTN, the documentation is first of all its API reference on
+[momodeveloper.mtn.com](https://momodeveloper.mtn.com/API-collections). See [docs/mtn.md](docs/mtn.md).
+The [lepresk/momo-api](https://github.com/lepresk/momo-api) client runs against Mbongo without changes,
+except for its deposits, which name a `payer` where MTN's reference wants a `payee`.
 
 ## Licence
 

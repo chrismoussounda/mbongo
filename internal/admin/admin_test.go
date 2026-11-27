@@ -161,3 +161,27 @@ func TestBadInputs(t *testing.T) {
 		}
 	}
 }
+
+func TestFundAPayoutAccount(t *testing.T) {
+	e := setup(t, adminToken)
+	_, sub := e.admin("/_mbongo/mtn/subscriptions", map[string]string{"product": "disbursement"})
+	_, user := e.admin("/_mbongo/mtn/api-users", map[string]string{"subscriptionKey": sub["subscriptionKey"].(string),
+		"providerCallbackHost": "shop.example", "targetEnvironment": "mtncongo"})
+	path := "/_mbongo/mtn/" + user["apiUser"].(string) + "/fund"
+
+	status, body := e.admin(path, map[string]string{"amount": "250000"})
+	if status != http.StatusOK || body["balance"] != "250000" || body["currency"] != "XAF" {
+		t.Fatalf("fund: %d %v", status, body)
+	}
+	for _, amount := range []string{"0", "1.5", "x", ""} {
+		if status, _ := e.admin(path, map[string]string{"amount": amount}); status != http.StatusBadRequest {
+			t.Errorf("amount %q: %d", amount, status)
+		}
+	}
+	if status, _ := e.admin("/_mbongo/mtn/00000000-0000-4000-8000-000000000000/fund", map[string]string{"amount": "1"}); status != http.StatusNotFound {
+		t.Fatalf("unknown user: %d", status)
+	}
+	if err := e.books.Check(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+}

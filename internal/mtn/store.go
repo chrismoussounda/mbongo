@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"errors"
+	"strings"
 	"time"
 
 	"modernc.org/sqlite"
@@ -51,6 +52,17 @@ CREATE TABLE mtn_requests (
 );
 `
 
+const payoutsSchema = `
+ALTER TABLE mtn_requests ADD COLUMN operation TEXT NOT NULL DEFAULT 'requesttopay';
+ALTER TABLE mtn_requests ADD COLUMN refund_of TEXT NOT NULL DEFAULT '';
+`
+
+// A partner owns several subscriptions, one per product, as on MTN's partner portal.
+const partnersSchema = `
+ALTER TABLE mtn_subscriptions ADD COLUMN partner TEXT NOT NULL DEFAULT '';
+UPDATE mtn_subscriptions SET partner = key;
+`
+
 const (
 	Sandbox  = "sandbox"
 	MTNCongo = "mtncongo"
@@ -58,7 +70,7 @@ const (
 
 var (
 	ErrNotFound            = errors.New("mtn: no such request")
-	ErrUnknownProduct      = errors.New("mtn: product must be collection")
+	ErrUnknownProduct      = errors.New("mtn: product must be collection or disbursement")
 	ErrUnknownEnvironment  = errors.New("mtn: targetEnvironment must be sandbox or mtncongo")
 	ErrUnknownSubscription = errors.New("mtn: unknown subscription key")
 )
@@ -89,16 +101,26 @@ type store struct {
 }
 
 func newStore(ctx context.Context, books *bank.Bank) (*store, error) {
-	if err := migrate.Run(ctx, books.DB(), "mtn", []string{schema}); err != nil {
+	if err := migrate.Run(ctx, books.DB(), "mtn", []string{schema, payoutsSchema, partnersSchema}); err != nil {
 		return nil, err
 	}
 	return &store{db: books.DB(), books: books}, nil
 }
 
-func (s *store) addSubscription(ctx context.Context, product string) (string, error) {
+func (s *store) addSubscription(ctx context.Context, product, partner string) (string, error) {
 	key := randomHex()
-	_, err := s.db.ExecContext(ctx, "INSERT INTO mtn_subscriptions (key, product) VALUES (?, ?)", key, product)
+	if partner == "" {
+		partner = key
+	}
+	_, err := s.db.ExecContext(ctx, "INSERT INTO mtn_subscriptions (key, product, partner) VALUES (?, ?, ?)",
+		key, product, partner)
 	return key, err
+}
+
+func (s *store) partner(ctx context.Context, subscription string) (string, error) {
+	var partner string
+	err := s.db.QueryRowContext(ctx, "SELECT partner FROM mtn_subscriptions WHERE key = ?", subscription).Scan(&partner)
+	return partner, err
 }
 
 func (s *store) subscriptionProduct(ctx context.Context, key string) (string, error) {
@@ -116,7 +138,13 @@ func (s *store) addAPIUser(ctx context.Context, u apiUser) error {
 		VALUES (?, ?, ?, ?, ?)`, u.ID, u.Subscription, u.CallbackHost, u.Environment, u.APIKey); err != nil {
 		return err
 	}
-	_, err := s.books.OpenMerchant(ctx, bank.MTN, u.ID, currency(u.Environment), 0)
+	opening := int64(0)
+	if product, err := s.subscriptionProduct(ctx, u.Subscription); err != nil {
+		return err
+	} else if u.Environment == Sandbox && product == disbursement {
+		opening = sandboxFloat
+	}
+	_, err := s.books.OpenMerchant(ctx, bank.MTN, u.ID, currency(u.Environment), opening)
 	return err
 }
 
@@ -160,6 +188,8 @@ type request struct {
 	APIUser       string
 	ReferenceID   string
 	Product       string
+	Operation     string
+	RefundOf      string
 	TransactionID sql.NullString
 	PartyID       string
 	Amount        string
@@ -171,13 +201,51 @@ type request struct {
 	Failure       string
 }
 
+const requestColumns = `api_user, reference_id, product, operation, refund_of, transaction_id, party_id,
+	amount, currency, external_id, payer_message, payee_note, callback_url, failure`
+
+func (r *request) fields() []any {
+	return []any{&r.APIUser, &r.ReferenceID, &r.Product, &r.Operation, &r.RefundOf, &r.TransactionID,
+		&r.PartyID, &r.Amount, &r.Currency, &r.ExternalID, &r.PayerMessage, &r.PayeeNote, &r.CallbackURL, &r.Failure}
+}
+
+// collectionToRefund finds a request to pay by its reference among the partner's users in
+// one environment, since a refund comes back from the same partner.
+func (s *store) collectionToRefund(ctx context.Context, ref, environment, partner string) (request, error) {
+	var r request
+	err := s.db.QueryRowContext(ctx, `SELECT `+prefixed("r.", requestColumns)+`
+		FROM mtn_requests r
+		JOIN mtn_api_users u ON u.id = r.api_user
+		JOIN mtn_subscriptions s ON s.key = u.subscription
+		WHERE r.reference_id = ? AND r.operation = 'requesttopay' AND u.environment = ? AND s.partner = ?`,
+		ref, environment, partner).Scan(r.fields()...)
+	if errors.Is(err, sql.ErrNoRows) {
+		return r, ErrNotFound
+	}
+	return r, err
+}
+
+// refunded is what the refunds of a collection already take or will take, in the smallest unit.
+func refunded(ctx context.Context, q querier, ref string) (int64, error) {
+	var n int64
+	err := q.QueryRowContext(ctx, `SELECT COALESCE(SUM(t.amount), 0) FROM mtn_requests r
+		JOIN transactions t ON t.id = r.transaction_id
+		WHERE r.operation = 'refund' AND r.refund_of = ? AND t.status IN ('pending', 'successful')`, ref).Scan(&n)
+	return n, err
+}
+
+func prefixed(prefix, columns string) string {
+	parts := strings.Split(columns, ",")
+	for i, c := range parts {
+		parts[i] = prefix + strings.TrimSpace(c)
+	}
+	return strings.Join(parts, ", ")
+}
+
 func (s *store) request(ctx context.Context, user, ref string) (request, error) {
 	var r request
-	err := s.db.QueryRowContext(ctx, `SELECT api_user, reference_id, product, transaction_id, party_id, amount,
-		currency, external_id, payer_message, payee_note, callback_url, failure
-		FROM mtn_requests WHERE api_user = ? AND reference_id = ?`, user, ref).Scan(&r.APIUser, &r.ReferenceID,
-		&r.Product, &r.TransactionID, &r.PartyID, &r.Amount, &r.Currency, &r.ExternalID, &r.PayerMessage,
-		&r.PayeeNote, &r.CallbackURL, &r.Failure)
+	err := s.db.QueryRowContext(ctx, `SELECT `+requestColumns+`
+		FROM mtn_requests WHERE api_user = ? AND reference_id = ?`, user, ref).Scan(r.fields()...)
 	if errors.Is(err, sql.ErrNoRows) {
 		return r, ErrNotFound
 	}
@@ -188,16 +256,19 @@ type execer interface {
 	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
 }
 
+type querier interface {
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
+
 func (s *store) insertRequest(ctx context.Context, r request) error {
 	return insertRequest(ctx, s.db, r)
 }
 
 func insertRequest(ctx context.Context, db execer, r request) error {
-	_, err := db.ExecContext(ctx, `INSERT INTO mtn_requests (api_user, reference_id, product, transaction_id,
-		party_id, amount, currency, external_id, payer_message, payee_note, callback_url, failure)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		r.APIUser, r.ReferenceID, r.Product, r.TransactionID, r.PartyID, r.Amount, r.Currency, r.ExternalID,
-		r.PayerMessage, r.PayeeNote, r.CallbackURL, r.Failure)
+	_, err := db.ExecContext(ctx, `INSERT INTO mtn_requests (`+requestColumns+`)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		r.APIUser, r.ReferenceID, r.Product, r.Operation, r.RefundOf, r.TransactionID, r.PartyID, r.Amount,
+		r.Currency, r.ExternalID, r.PayerMessage, r.PayeeNote, r.CallbackURL, r.Failure)
 	if err != nil && isUnique(err) {
 		return errDuplicate
 	}

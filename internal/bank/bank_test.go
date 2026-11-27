@@ -329,3 +329,21 @@ func TestRequestWithSavesNothingWhenTheExtraStepFails(t *testing.T) {
 		t.Fatalf("the transaction was kept: %v", err)
 	}
 }
+
+func TestFundTopsUpFromTheMint(t *testing.T) {
+	f := setup(t)
+	m := f.merchant("shop", 1_000)
+	got, err := f.bank.Fund(f.ctx, m.ID, 4_000)
+	if err != nil || got.Balance != 5_000 || f.balance(m) != 5_000 {
+		t.Fatalf("%+v, %v, stored %d", got, err, f.balance(m))
+	}
+	f.check()
+	for _, amount := range []int64{0, -1} {
+		if _, err := f.bank.Fund(f.ctx, m.ID, amount); !errors.Is(err, bank.ErrInvalid) {
+			t.Errorf("amount %d: %v", amount, err)
+		}
+	}
+	if _, err := f.bank.Fund(f.ctx, 999, 1); !errors.Is(err, bank.ErrNotFound) {
+		t.Fatalf("unknown account: %v", err)
+	}
+}

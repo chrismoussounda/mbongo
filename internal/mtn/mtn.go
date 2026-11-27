@@ -1,4 +1,4 @@
-// Package mtn answers like MTN MoMo's Open API. docs/mtn-collection.md says where each
+// Package mtn answers like MTN MoMo's Open API. docs/mtn.md says where each
 // behaviour comes from.
 package mtn
 
@@ -15,12 +15,15 @@ import (
 )
 
 const (
-	collection = "collection"
-	tokenTTL   = time.Hour
+	collection   = "collection"
+	disbursement = "disbursement"
+	tokenTTL     = time.Hour
 	// approvalWindow is how long a customer has to approve (docs).
 	approvalWindow = 5 * time.Minute
 	maxMessage     = 160
 	maxBody        = 64 << 10
+	// sandboxFloat is what a sandbox payout account starts with (assumed).
+	sandboxFloat = 1_000_000_000_00
 )
 
 // Sandbox test numbers (sdk).
@@ -60,12 +63,15 @@ func (s *Service) PurgeTokens(ctx context.Context) error {
 
 func put(client *http.Client) Sender {
 	return func(ctx context.Context, u string, body []byte) error {
-		req, err := http.NewRequestWithContext(ctx, http.MethodPut, u, bytes.NewReader(body))
+		// Calling a URL chosen by the client is the point of a callback; readRequest already
+		// limits it to the host the API user registered, as MTN does.
+		req, err := http.NewRequestWithContext(ctx, http.MethodPut, u, bytes.NewReader(body)) //nolint:gosec // G704, see above
+
 		if err != nil {
 			return err
 		}
 		req.Header.Set("Content-Type", "application/json")
-		res, err := client.Do(req)
+		res, err := client.Do(req) //nolint:gosec // G704, see above
 		if err != nil {
 			return err
 		}
@@ -77,19 +83,25 @@ func (s *Service) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1_0/apiuser", s.createAPIUser)
 	mux.HandleFunc("GET /v1_0/apiuser/{id}", s.getAPIUser)
 	mux.HandleFunc("POST /v1_0/apiuser/{id}/apikey", s.createAPIKey)
-	mux.HandleFunc("POST /collection/token/", s.issueToken(collection))
-	mux.HandleFunc("POST /collection/v1_0/requesttopay", s.authorized(collection, s.requestToPay))
-	mux.HandleFunc("GET /collection/v1_0/requesttopay/{ref}", s.authorized(collection, s.requestToPayStatus))
-	mux.HandleFunc("GET /collection/v1_0/account/balance", s.authorized(collection, s.balance))
-	mux.HandleFunc("GET /collection/v1_0/accountholder/{type}/{id}/active", s.authorized(collection, s.accountHolder))
+	for _, product := range []string{collection, disbursement} {
+		mux.HandleFunc("POST /"+product+"/token/", s.issueToken(product))
+		mux.HandleFunc("GET /"+product+"/v1_0/account/balance", s.authorized(product, s.balance))
+		mux.HandleFunc("GET /"+product+"/v1_0/accountholder/{type}/{id}/active", s.authorized(product, s.accountHolder))
+	}
+	for _, op := range []operation{opRequestToPay, opTransfer, opDeposit, opRefund} {
+		mux.HandleFunc("POST /"+op.product+"/v1_0/"+op.name, s.authorized(op.product, s.create(op)))
+		mux.HandleFunc("GET /"+op.product+"/v1_0/"+op.name+"/{ref}", s.authorized(op.product, s.status(op)))
+	}
 }
 
-// CreateSubscription issues a subscription key, as MTN's portal does.
-func (s *Service) CreateSubscription(ctx context.Context, product string) (string, error) {
-	if product != collection {
+// CreateSubscription issues a subscription key, as MTN's portal does. Subscriptions with the
+// same partner belong together, so payouts can refund that partner's collections; an empty
+// partner makes the subscription a partner of its own.
+func (s *Service) CreateSubscription(ctx context.Context, product, partner string) (string, error) {
+	if product != collection && product != disbursement {
 		return "", ErrUnknownProduct
 	}
-	return s.store.addSubscription(ctx, product)
+	return s.store.addSubscription(ctx, product, partner)
 }
 
 // CreateAPIUser makes a user with its key at once, as MTN's partner portal does for production.
@@ -109,23 +121,35 @@ func (s *Service) CreateAPIUser(ctx context.Context, subscription, callbackHost,
 	return id, key, err
 }
 
+// Account is where an API user's collections land and its payouts are paid from.
+func (s *Service) Account(ctx context.Context, user string) (bank.Account, error) {
+	return s.store.merchant(ctx, user)
+}
+
+func (s *Service) Fund(ctx context.Context, user string, amount int64) (bank.Account, error) {
+	a, err := s.store.merchant(ctx, user)
+	if err != nil {
+		return a, err
+	}
+	return s.books.Fund(ctx, a.ID, amount)
+}
+
 // Approve also sends the callback.
 func (s *Service) Approve(ctx context.Context, user, ref string) error {
-	return s.decide(ctx, user, ref, func(id string) error {
-		_, err := s.books.Approve(ctx, id)
-		return err
+	return s.decide(ctx, user, ref, func(u apiUser, op operation, id string) error {
+		return s.approve(ctx, u, op, id)
 	})
 }
 
 // Refuse also sends the callback.
 func (s *Service) Refuse(ctx context.Context, user, ref string) error {
-	return s.decide(ctx, user, ref, func(id string) error {
+	return s.decide(ctx, user, ref, func(_ apiUser, _ operation, id string) error {
 		_, err := s.books.Refuse(ctx, id, bank.ReasonRefused)
 		return err
 	})
 }
 
-func (s *Service) decide(ctx context.Context, user, ref string, f func(id string) error) error {
+func (s *Service) decide(ctx context.Context, user, ref string, f func(apiUser, operation, string) error) error {
 	r, err := s.store.request(ctx, user, ref)
 	if err != nil {
 		return err
@@ -133,7 +157,15 @@ func (s *Service) decide(ctx context.Context, user, ref string, f func(id string
 	if !r.TransactionID.Valid {
 		return bank.ErrDecided
 	}
-	if err := f(r.TransactionID.String); err != nil {
+	u, err := s.store.apiUser(ctx, user)
+	if err != nil {
+		return err
+	}
+	op, err := operationNamed(r.Operation)
+	if err != nil {
+		return err
+	}
+	if err := f(u, op, r.TransactionID.String); err != nil {
 		return err
 	}
 	s.notify(r)
