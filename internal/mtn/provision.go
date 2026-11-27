@@ -20,7 +20,7 @@ func (s *Service) createAPIUser(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		ProviderCallbackHost string `json:"providerCallbackHost"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.ProviderCallbackHost == "" {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBody)).Decode(&body); err != nil || body.ProviderCallbackHost == "" {
 		writeError(w, http.StatusBadRequest, "VALIDATION_ERROR", "providerCallbackHost is required.")
 		return
 	}

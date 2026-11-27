@@ -362,6 +362,8 @@ func TestRequestToPayValidation(t *testing.T) {
 		{"callback elsewhere", ref1, pay("46733123453", "10", "EUR"), "https://evil.example/x", 400, "INVALID_CALLBACK_URL_HOST"},
 		{"message too long", ref1, map[string]any{"amount": "10", "currency": "EUR",
 			"payer": map[string]string{"partyIdType": "MSISDN", "partyId": "46733123453"}, "payerMessage": long}, "", 400, "VALIDATION_ERROR"},
+		{"body over 64 KiB", ref1, map[string]any{"amount": "10", "currency": "EUR", "externalId": strings.Repeat("x", 70_000),
+			"payer": map[string]string{"partyIdType": "MSISDN", "partyId": "46733123453"}}, "", 400, "VALIDATION_ERROR"},
 		{"email payer", ref1, map[string]any{"amount": "10", "currency": "EUR",
 			"payer": map[string]string{"partyIdType": "EMAIL", "partyId": "46733123453"}}, "", 400, "VALIDATION_ERROR"},
 	}

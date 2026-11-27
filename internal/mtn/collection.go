@@ -42,7 +42,7 @@ func (s *Service) requestToPay(w http.ResponseWriter, r *http.Request, u apiUser
 		return
 	}
 	var p payment
-	dec := json.NewDecoder(r.Body)
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBody))
 	if err := dec.Decode(&p); err != nil {
 		writeError(w, http.StatusBadRequest, "VALIDATION_ERROR", "The request body is not valid JSON.")
 		return

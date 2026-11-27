@@ -20,6 +20,7 @@ const (
 	// approvalWindow is how long a customer has to approve (docs).
 	approvalWindow = 5 * time.Minute
 	maxMessage     = 160
+	maxBody        = 64 << 10
 )
 
 // Sandbox test numbers (sdk).
