@@ -53,6 +53,11 @@ func New(ctx context.Context, books *bank.Bank, logger *slog.Logger, send Sender
 	return &Service{store: st, books: books, logger: logger, send: send}, nil
 }
 
+func (s *Service) PurgeTokens(ctx context.Context) error {
+	_, err := s.store.purgeTokens(ctx, s.books.Clock().Now())
+	return err
+}
+
 func put(client *http.Client) Sender {
 	return func(ctx context.Context, u string, body []byte) error {
 		req, err := http.NewRequestWithContext(ctx, http.MethodPut, u, bytes.NewReader(body))

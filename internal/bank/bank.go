@@ -392,21 +392,6 @@ func (b *Bank) expireDue(ctx context.Context, tx *sql.Tx) (int64, error) {
 	return res.RowsAffected()
 }
 
-func (b *Bank) Sweep(ctx context.Context, every time.Duration, onError func(error)) {
-	ticker := time.NewTicker(every)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			if _, err := b.ExpireDue(ctx); err != nil && ctx.Err() == nil {
-				onError(err)
-			}
-		}
-	}
-}
-
 func (b *Bank) decide(ctx context.Context, tx *sql.Tx, t *Transaction, s Status, r Reason) error {
 	t.Status, t.Reason, t.DecidedAt = s, r, b.clock.Now()
 	_, err := tx.ExecContext(ctx,
@@ -511,13 +496,13 @@ func newID() string {
 	return rand.Text()
 }
 
-// stampLayout has a fixed width, so SQLite can compare times as text.
-const stampLayout = "2006-01-02T15:04:05.000000000Z"
+// TimeLayout has a fixed width, so SQLite can compare stored times as text.
+const TimeLayout = "2006-01-02T15:04:05.000000000Z"
 
-func stamp(t time.Time) string { return t.UTC().Format(stampLayout) }
+func stamp(t time.Time) string { return t.UTC().Format(TimeLayout) }
 
 func parse(s string) (time.Time, error) {
-	t, err := time.Parse(stampLayout, s)
+	t, err := time.Parse(TimeLayout, s)
 	if err != nil {
 		return t, fmt.Errorf("bank: bad time %q in the database: %w", s, err)
 	}

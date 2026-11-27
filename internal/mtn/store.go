@@ -138,7 +138,7 @@ func (s *store) setAPIKey(ctx context.Context, id, key string) error {
 func (s *store) addToken(ctx context.Context, user, product string, expires time.Time) (string, error) {
 	token := randomHex() + randomHex()
 	_, err := s.db.ExecContext(ctx, "INSERT INTO mtn_tokens (token, api_user, product, expires_at) VALUES (?, ?, ?, ?)",
-		token, user, product, expires.UTC().Format(time.RFC3339Nano))
+		token, user, product, expires.UTC().Format(bank.TimeLayout))
 	return token, err
 }
 
@@ -152,7 +152,7 @@ func (s *store) token(ctx context.Context, token string) (user, product string, 
 	if err != nil {
 		return "", "", time.Time{}, err
 	}
-	expires, err = time.Parse(time.RFC3339Nano, at)
+	expires, err = time.Parse(bank.TimeLayout, at)
 	return user, product, expires, err
 }
 
@@ -226,6 +226,14 @@ func isUnique(err error) bool {
 		return false
 	}
 	return e.Code() == sqlite3.SQLITE_CONSTRAINT_UNIQUE || e.Code() == sqlite3.SQLITE_CONSTRAINT_PRIMARYKEY
+}
+
+func (s *store) purgeTokens(ctx context.Context, now time.Time) (int64, error) {
+	res, err := s.db.ExecContext(ctx, "DELETE FROM mtn_tokens WHERE expires_at <= ?", now.UTC().Format(bank.TimeLayout))
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
 }
 
 // markNotified reports whether this call is the one that should send the callback.

@@ -16,6 +16,7 @@ import (
 	"github.com/chrismoussounda/mbongo/internal/admin"
 	"github.com/chrismoussounda/mbongo/internal/bank"
 	"github.com/chrismoussounda/mbongo/internal/clock"
+	"github.com/chrismoussounda/mbongo/internal/janitor"
 	"github.com/chrismoussounda/mbongo/internal/mtn"
 	"github.com/chrismoussounda/mbongo/internal/server"
 )
@@ -44,19 +45,21 @@ func run(ctx context.Context, getenv func(string) string, out io.Writer) error {
 	}
 	defer func() { _ = books.Close() }()
 
-	sweepCtx, stopSweep := context.WithCancel(ctx)
-	swept := make(chan struct{})
-	go func() {
-		defer close(swept)
-		books.Sweep(sweepCtx, time.Second, func(err error) { logger.Error("expiry sweep", "err", err) })
-	}()
-	defer func() { stopSweep(); <-swept }()
-
 	momo, err := mtn.New(ctx, books, logger, nil)
 	if err != nil {
 		return err
 	}
 	defer momo.Wait()
+
+	sweepCtx, stopSweep := context.WithCancel(ctx)
+	swept := make(chan struct{})
+	go func() {
+		defer close(swept)
+		janitor.Run(sweepCtx, time.Second, func(err error) { logger.Error("housekeeping", "err", err) },
+			func(ctx context.Context) error { _, err := books.ExpireDue(ctx); return err },
+			momo.PurgeTokens)
+	}()
+	defer func() { stopSweep(); <-swept }()
 
 	srv := &http.Server{
 		Addr: address(getenv),
