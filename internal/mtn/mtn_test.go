@@ -110,7 +110,12 @@ func (e *env) merchant(environment string) *merchant {
 
 func (e *env) user(product, environment string) *merchant {
 	e.t.Helper()
-	sub, err := e.svc.CreateSubscription(e.ctx, product)
+	return e.partnerUser("shop", product, environment)
+}
+
+func (e *env) partnerUser(partner, product, environment string) *merchant {
+	e.t.Helper()
+	sub, err := e.svc.CreateSubscription(e.ctx, product, partner)
 	if err != nil {
 		e.t.Fatal(err)
 	}
@@ -187,7 +192,7 @@ func keys(m map[string]any) string {
 
 func TestSandboxProvisioning(t *testing.T) {
 	e := setup(t)
-	sub, _ := e.svc.CreateSubscription(e.ctx, "collection")
+	sub, _ := e.svc.CreateSubscription(e.ctx, "collection", "")
 	h := map[string]string{"Ocp-Apim-Subscription-Key": sub, "X-Reference-Id": ref1}
 
 	if a := e.call(http.MethodPost, "/v1_0/apiuser", h, map[string]string{"providerCallbackHost": "shop.example"}); a.status != 201 {
@@ -211,7 +216,7 @@ func TestSandboxProvisioning(t *testing.T) {
 		t.Fatalf("token: %d %v", tok.status, tok.body)
 	}
 
-	other, _ := e.svc.CreateSubscription(e.ctx, "collection")
+	other, _ := e.svc.CreateSubscription(e.ctx, "collection", "")
 	if a := e.call(http.MethodGet, "/v1_0/apiuser/"+ref1, map[string]string{"Ocp-Apim-Subscription-Key": other}, nil); a.status != 404 {
 		t.Fatalf("user seen through another subscription: %d", a.status)
 	}
@@ -238,7 +243,7 @@ func TestTokenRefusals(t *testing.T) {
 		t.Fatalf("no environment: %d %v", a.status, a.body)
 	}
 	otherSub := *m
-	otherSub.sub, _ = e.svc.CreateSubscription(e.ctx, "collection")
+	otherSub.sub, _ = e.svc.CreateSubscription(e.ctx, "collection", "")
 	if a := otherSub.token(); a.status != 401 || a.body["error"] != "login_failed" {
 		t.Fatalf("someone else's subscription: %d %v", a.status, a.body)
 	}

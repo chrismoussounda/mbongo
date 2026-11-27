@@ -177,6 +177,10 @@ func TestRefundNeedsASuccessfulPayment(t *testing.T) {
 	if a := d.post("refund", ref2, refund(ref3, "1")); a.status != 404 {
 		t.Fatalf("refund of a transfer: %d %v", a.status, a.body)
 	}
+	stranger := e.partnerUser("another shop", "disbursement", "sandbox")
+	if a := stranger.post("refund", ref2, refund(ref1, "1")); a.status != 404 {
+		t.Fatalf("refund of another partner's payment: %d %v", a.status, a.body)
+	}
 	congo := e.user("disbursement", "mtncongo")
 	if a := congo.post("refund", ref2, map[string]any{"amount": "1", "currency": "XAF", "referenceIdToRefund": ref1}); a.status != 404 {
 		t.Fatalf("refund across environments: %d %v", a.status, a.body)

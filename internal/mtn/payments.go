@@ -145,7 +145,12 @@ var errOverRefund = errors.New("mtn: refund larger than what is left of the paym
 // What is left to refund is checked when the refund is saved (assumed rules).
 func (s *Service) checkRefund(w http.ResponseWriter, r *http.Request, u apiUser, of string, req *request) (int64, bool) {
 	ctx := r.Context()
-	original, err := s.store.collectionToRefund(ctx, of, u.Environment)
+	partner, err := s.store.partner(ctx, u.Subscription)
+	if err != nil {
+		s.internal(w, err)
+		return 0, false
+	}
+	original, err := s.store.collectionToRefund(ctx, of, u.Environment, partner)
 	if errors.Is(err, ErrNotFound) {
 		writeError(w, http.StatusNotFound, "RESOURCE_NOT_FOUND", "referenceIdToRefund was not found.")
 		return 0, false

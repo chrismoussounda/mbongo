@@ -91,12 +91,14 @@ func (s *Service) Routes(mux *http.ServeMux) {
 	}
 }
 
-// CreateSubscription issues a subscription key, as MTN's portal does.
-func (s *Service) CreateSubscription(ctx context.Context, product string) (string, error) {
+// CreateSubscription issues a subscription key, as MTN's portal does. Subscriptions with the
+// same partner belong together, so payouts can refund that partner's collections; an empty
+// partner makes the subscription a partner of its own.
+func (s *Service) CreateSubscription(ctx context.Context, product, partner string) (string, error) {
 	if product != collection && product != disbursement {
 		return "", ErrUnknownProduct
 	}
-	return s.store.addSubscription(ctx, product)
+	return s.store.addSubscription(ctx, product, partner)
 }
 
 // CreateAPIUser makes a user with its key at once, as MTN's partner portal does for production.

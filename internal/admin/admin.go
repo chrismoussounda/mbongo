@@ -50,11 +50,12 @@ func (h *handler) guard(next http.HandlerFunc) http.HandlerFunc {
 func (h *handler) subscription(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		Product string `json:"product"`
+		Partner string `json:"partner"`
 	}
 	if !read(w, r, &in) {
 		return
 	}
-	key, err := h.mtn.CreateSubscription(r.Context(), in.Product)
+	key, err := h.mtn.CreateSubscription(r.Context(), in.Product, in.Partner)
 	if errors.Is(err, mtn.ErrUnknownProduct) {
 		h.refuse(w, "product must be collection or disbursement")
 		return

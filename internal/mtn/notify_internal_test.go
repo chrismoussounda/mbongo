@@ -26,7 +26,7 @@ func TestACallbackIsSentOnlyOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sub, _ := s.CreateSubscription(ctx, collection)
+	sub, _ := s.CreateSubscription(ctx, collection, "")
 	user, _, _ := s.CreateAPIUser(ctx, sub, "shop.example", MTNCongo)
 	req := request{APIUser: user, ReferenceID: "r", Product: collection, PartyID: "242061234567",
 		Amount: "1", Currency: "XAF", CallbackURL: "https://shop.example/cb", Failure: "PAYER_NOT_FOUND"}

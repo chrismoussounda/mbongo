@@ -57,6 +57,12 @@ ALTER TABLE mtn_requests ADD COLUMN operation TEXT NOT NULL DEFAULT 'requesttopa
 ALTER TABLE mtn_requests ADD COLUMN refund_of TEXT NOT NULL DEFAULT '';
 `
 
+// A partner owns several subscriptions, one per product, as on MTN's partner portal.
+const partnersSchema = `
+ALTER TABLE mtn_subscriptions ADD COLUMN partner TEXT NOT NULL DEFAULT '';
+UPDATE mtn_subscriptions SET partner = key;
+`
+
 const (
 	Sandbox  = "sandbox"
 	MTNCongo = "mtncongo"
@@ -95,16 +101,26 @@ type store struct {
 }
 
 func newStore(ctx context.Context, books *bank.Bank) (*store, error) {
-	if err := migrate.Run(ctx, books.DB(), "mtn", []string{schema, payoutsSchema}); err != nil {
+	if err := migrate.Run(ctx, books.DB(), "mtn", []string{schema, payoutsSchema, partnersSchema}); err != nil {
 		return nil, err
 	}
 	return &store{db: books.DB(), books: books}, nil
 }
 
-func (s *store) addSubscription(ctx context.Context, product string) (string, error) {
+func (s *store) addSubscription(ctx context.Context, product, partner string) (string, error) {
 	key := randomHex()
-	_, err := s.db.ExecContext(ctx, "INSERT INTO mtn_subscriptions (key, product) VALUES (?, ?)", key, product)
+	if partner == "" {
+		partner = key
+	}
+	_, err := s.db.ExecContext(ctx, "INSERT INTO mtn_subscriptions (key, product, partner) VALUES (?, ?, ?)",
+		key, product, partner)
 	return key, err
+}
+
+func (s *store) partner(ctx context.Context, subscription string) (string, error) {
+	var partner string
+	err := s.db.QueryRowContext(ctx, "SELECT partner FROM mtn_subscriptions WHERE key = ?", subscription).Scan(&partner)
+	return partner, err
 }
 
 func (s *store) subscriptionProduct(ctx context.Context, key string) (string, error) {
@@ -193,13 +209,16 @@ func (r *request) fields() []any {
 		&r.PartyID, &r.Amount, &r.Currency, &r.ExternalID, &r.PayerMessage, &r.PayeeNote, &r.CallbackURL, &r.Failure}
 }
 
-// collectionToRefund finds a request to pay by its reference among the environment's users.
-func (s *store) collectionToRefund(ctx context.Context, ref, environment string) (request, error) {
+// collectionToRefund finds a request to pay by its reference among the partner's users in
+// one environment, since a refund comes back from the same partner.
+func (s *store) collectionToRefund(ctx context.Context, ref, environment, partner string) (request, error) {
 	var r request
 	err := s.db.QueryRowContext(ctx, `SELECT `+prefixed("r.", requestColumns)+`
-		FROM mtn_requests r JOIN mtn_api_users u ON u.id = r.api_user
-		WHERE r.reference_id = ? AND r.operation = 'requesttopay' AND u.environment = ?
-		ORDER BY r.rowid LIMIT 1`, ref, environment).Scan(r.fields()...)
+		FROM mtn_requests r
+		JOIN mtn_api_users u ON u.id = r.api_user
+		JOIN mtn_subscriptions s ON s.key = u.subscription
+		WHERE r.reference_id = ? AND r.operation = 'requesttopay' AND u.environment = ? AND s.partner = ?`,
+		ref, environment, partner).Scan(r.fields()...)
 	if errors.Is(err, sql.ErrNoRows) {
 		return r, ErrNotFound
 	}
