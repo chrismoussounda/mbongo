@@ -157,41 +157,56 @@ func (s *Service) requestToPayStatus(w http.ResponseWriter, r *http.Request, u a
 	writeJSON(w, http.StatusOK, body)
 }
 
-func (s *Service) statusBody(ctx context.Context, u apiUser, req request) (map[string]any, error) {
-	body := map[string]any{
-		"amount":       req.Amount,
-		"currency":     req.Currency,
-		"externalId":   req.ExternalID,
-		"payer":        party{PartyIDType: "MSISDN", PartyID: req.PartyID},
-		"payerMessage": req.PayerMessage,
-		"payeeNote":    req.PayeeNote,
+type paymentStatus struct {
+	Amount                 string  `json:"amount"`
+	Currency               string  `json:"currency"`
+	FinancialTransactionID string  `json:"financialTransactionId,omitempty"`
+	ExternalID             string  `json:"externalId"`
+	Payer                  party   `json:"payer"`
+	PayerMessage           string  `json:"payerMessage"`
+	PayeeNote              string  `json:"payeeNote"`
+	Status                 string  `json:"status"`
+	Reason                 *reason `json:"reason,omitempty"`
+}
+
+// reason is an object in the sandbox but a bare code in Congo (sdk).
+type reason struct {
+	Code string
+	Bare bool
+}
+
+func (r reason) MarshalJSON() ([]byte, error) {
+	if r.Bare {
+		return json.Marshal(r.Code)
 	}
-	status, reason := "FAILED", req.Failure
+	return json.Marshal(map[string]string{"code": r.Code, "message": reasonMessage(r.Code)})
+}
+
+func (s *Service) statusBody(ctx context.Context, u apiUser, req request) (paymentStatus, error) {
+	body := paymentStatus{Amount: req.Amount, Currency: req.Currency, ExternalID: req.ExternalID,
+		Payer: party{PartyIDType: "MSISDN", PartyID: req.PartyID}, PayerMessage: req.PayerMessage,
+		PayeeNote: req.PayeeNote, Status: "FAILED"}
+	code := req.Failure
 	if req.TransactionID.Valid {
 		t, err := s.books.Transaction(ctx, req.TransactionID.String)
 		if err != nil {
-			return nil, err
+			return body, err
 		}
 		switch t.Status {
 		case bank.Pending:
-			status = "PENDING"
+			body.Status = "PENDING"
 		case bank.Successful:
-			status = "SUCCESSFUL"
-			body["financialTransactionId"] = fmt.Sprint(crc32.ChecksumIEEE([]byte(t.ID)))
+			body.Status = "SUCCESSFUL"
+			body.FinancialTransactionID = fmt.Sprint(crc32.ChecksumIEEE([]byte(t.ID)))
 		case bank.Expired:
-			reason = "EXPIRED"
+			code = "EXPIRED"
 		case bank.Failed:
-			reason = failureCode(t.Reason, u.Environment)
+			code = failureCode(t.Reason, u.Environment)
 		}
 	}
-	if status == "FAILED" {
-		if u.Environment == Sandbox {
-			body["reason"] = map[string]string{"code": reason, "message": reasonMessage(reason)}
-		} else {
-			body["reason"] = reason
-		}
+	if body.Status == "FAILED" {
+		body.Reason = &reason{Code: code, Bare: u.Environment != Sandbox}
 	}
-	body["status"] = status
 	return body, nil
 }
 

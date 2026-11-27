@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -165,6 +166,15 @@ func (e *env) waitCallbacks(n int) []callback {
 	}
 }
 
+func keys(m map[string]any) string {
+	var k []string
+	for name := range m {
+		k = append(k, name)
+	}
+	sort.Strings(k)
+	return strings.Join(k, ",")
+}
+
 func TestSandboxProvisioning(t *testing.T) {
 	e := setup(t)
 	sub, _ := e.svc.CreateSubscription(e.ctx, "collection")
@@ -278,6 +288,10 @@ func TestSandboxPaymentSucceeds(t *testing.T) {
 	if s.status != 200 || s.body["status"] != "SUCCESSFUL" || s.body["amount"] != "25.50" ||
 		s.body["externalId"] != "order-7" || s.body["financialTransactionId"] == nil || s.body["reason"] != nil {
 		t.Fatalf("status: %v", s.body)
+	}
+	want := "amount,currency,externalId,financialTransactionId,payeeNote,payer,payerMessage,status"
+	if got := keys(s.body); got != want {
+		t.Fatalf("fields %s, want %s", got, want)
 	}
 	b := e.call(http.MethodGet, "/collection/v1_0/account/balance", m.headers(nil), nil)
 	if b.body["availableBalance"] != "25.50" || b.body["currency"] != "EUR" {
@@ -394,7 +408,7 @@ func TestCongoPaymentWaitsForThePayer(t *testing.T) {
 	}
 
 	_ = m.requestToPay(ref1, pay("242061234567", "2500", "XAF"), map[string]string{"X-Callback-Url": "https://shop.example/cb"})
-	if s := m.status(ref1); s.body["status"] != "PENDING" || s.body["financialTransactionId"] != nil {
+	if s := m.status(ref1); s.body["status"] != "PENDING" || s.body["financialTransactionId"] != nil || s.body["reason"] != nil {
 		t.Fatalf("before approval: %v", s.body)
 	}
 	if got := e.waitCallbacks(0); len(got) != 0 {
