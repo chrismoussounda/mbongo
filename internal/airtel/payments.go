@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/chrismoussounda/mbongo/internal/bank"
+	"github.com/chrismoussounda/mbongo/internal/faults"
 	"github.com/chrismoussounda/mbongo/internal/money"
 )
 
@@ -130,6 +131,18 @@ func (s *Service) start(w http.ResponseWriter, r *http.Request, app App, kind st
 // airtel_money_id, drawing another if that one is taken. check runs first, in the same
 // database transaction.
 func (s *Service) record(ctx context.Context, p *payment, req bank.Request, check func(*sql.Tx) error) (bank.Transaction, error) {
+	if rule, ok := faults.FromContext(ctx); ok {
+		switch rule.Fault {
+		case faults.Stuck:
+			req.Window = forever
+		case faults.Ambiguous:
+			delay := rule.Delay
+			if delay == 0 {
+				delay = ambiguousFor
+			}
+			p.AmbiguousUntil = s.books.Clock().Now().Add(delay).UTC().Format(bank.TimeLayout)
+		}
+	}
 	for {
 		p.AirtelMoneyID = s.moneyID()
 		if p.Kind == kindRefund {
@@ -187,6 +200,10 @@ func (s *Service) cashOut(w http.ResponseWriter, r *http.Request, app App) {
 		return
 	}
 	s.notify(p)
+	if st, unsettled := s.unsettled(r.Context(), p, t); unsettled {
+		ok(w, st.code, "SUCCESS", map[string]string{"id": p.ID, "status": st.status})
+		return
+	}
 	if t.Status != bank.Successful {
 		fail(w, cashCodes.code(cashCodes.noFunds), "Insufficient Funds", map[string]string{"id": p.ID, "status": "FAILED"})
 		return
@@ -205,6 +222,11 @@ func (s *Service) cashIn(w http.ResponseWriter, r *http.Request, app App) {
 	}
 	t, done := s.execute(w, r, t)
 	if !done {
+		return
+	}
+	if st, unsettled := s.unsettled(r.Context(), p, t); unsettled {
+		ok(w, st.code, "SUCCESS", map[string]any{"message": st.message, "status": st.status,
+			"transaction": map[string]string{"id": p.ID}})
 		return
 	}
 	if t.Status != bank.Successful {
@@ -231,6 +253,10 @@ func (s *Service) disburse(w http.ResponseWriter, r *http.Request, app App) {
 		return
 	}
 	c := disbursementCodes
+	if st, unsettled := s.unsettled(r.Context(), p, t); unsettled {
+		ok(w, st.code, "SUCCESS", map[string]any{"transaction": map[string]string{"id": p.ID, "status": st.status}})
+		return
+	}
 	if t.Status != bank.Successful {
 		fail(w, c.code(c.noFunds), "Insufficient Funds",
 			map[string]any{"transaction": map[string]string{"id": p.ID, "status": "TF"}})
@@ -299,6 +325,10 @@ func (s *Service) refund(w http.ResponseWriter, r *http.Request, app App) {
 	if !done {
 		return
 	}
+	if st, unsettled := s.unsettled(r.Context(), p, t); unsettled {
+		ok(w, st.code, "SUCCESS", map[string]any{"transaction": map[string]string{"airtel_money_id": p.AirtelMoneyID, "status": st.status}})
+		return
+	}
 	if t.Status != bank.Successful {
 		fail(w, c.code(c.noFunds), "Not enough balance", map[string]any{})
 		return
@@ -310,6 +340,9 @@ func (s *Service) refund(w http.ResponseWriter, r *http.Request, app App) {
 // execute settles a transaction nobody has to approve. A short payer fails it, which the
 // caller reads from the returned status.
 func (s *Service) execute(w http.ResponseWriter, r *http.Request, t bank.Transaction) (bank.Transaction, bool) {
+	if faults.Is(r.Context(), faults.Stuck) {
+		return t, true
+	}
 	t, err := s.books.Approve(r.Context(), t.ID)
 	if err != nil {
 		s.internal(w, err)
@@ -348,12 +381,25 @@ type outcome struct {
 	status, code, message string
 }
 
+// unsettled reports the outcome of a payment that has none yet to give: stuck in progress,
+// or ambiguous for a while.
+func (s *Service) unsettled(ctx context.Context, p payment, t bank.Transaction) (outcome, bool) {
+	st, err := s.outcome(ctx, p)
+	if err != nil || (st.status != "TIP" && st.status != "TA") {
+		return outcome{}, false
+	}
+	return st, t.Status == bank.Pending || st.status == "TA"
+}
+
 func (s *Service) outcome(ctx context.Context, p payment) (outcome, error) {
 	t, err := s.books.Transaction(ctx, p.TransactionID)
 	if err != nil {
 		return outcome{}, err
 	}
 	c := codesFor(p.Kind)
+	if p.AmbiguousUntil != "" && s.books.Clock().Now().UTC().Format(bank.TimeLayout) < p.AmbiguousUntil {
+		return outcome{"TA", c.code("00"), "Transaction is ambiguous"}, nil
+	}
 	switch t.Status {
 	case bank.Successful:
 		return outcome{"TS", c.code(c.success), "success"}, nil

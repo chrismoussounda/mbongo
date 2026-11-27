@@ -15,6 +15,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/chrismoussounda/mbongo/internal/bank"
+	"github.com/chrismoussounda/mbongo/internal/faults"
 	"github.com/chrismoussounda/mbongo/internal/money"
 )
 
@@ -86,7 +87,7 @@ func (s *Service) create(op operation) func(http.ResponseWriter, *http.Request, 
 			s.internal(w, err)
 			return
 		}
-		if req.TransactionID.Valid && (u.Environment == Sandbox || !op.approval) {
+		if req.TransactionID.Valid && (u.Environment == Sandbox || !op.approval) && !faults.Is(r.Context(), faults.Stuck) {
 			s.execute(r.Context(), u, op, req)
 		}
 		w.WriteHeader(http.StatusAccepted)
@@ -196,7 +197,10 @@ func (s *Service) start(ctx context.Context, u apiUser, op operation, req *reque
 		}
 	}
 	window := approvalWindow
-	if u.Environment == Sandbox && req.PartyID == numberPending {
+	switch {
+	case faults.Is(ctx, faults.Stuck):
+		window = forever
+	case u.Environment == Sandbox && req.PartyID == numberPending:
 		window = 24 * time.Hour
 	}
 	_, err := s.books.RequestWith(ctx, bank.Request{Kind: op.kind, Operator: bank.MTN, Merchant: u.ID,

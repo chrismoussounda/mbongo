@@ -8,7 +8,11 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"net/http"
 	"time"
+
+	"github.com/chrismoussounda/mbongo/internal/bank"
+	"github.com/chrismoussounda/mbongo/internal/faults"
 )
 
 type callbackTransaction struct {
@@ -20,33 +24,86 @@ type callbackTransaction struct {
 
 // notify posts the outcome to the app's one callback URL, once, in the background. With a
 // callback key, the body also carries hash: HMAC-SHA256 of the transaction object, in Base64.
+// A callback rule can make it never come, come twice, late, or before the answer; an
+// ambiguous payment's callback waits until its outcome shows.
 func (s *Service) notify(p payment) {
-	s.sends.Go(func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		defer cancel()
-		app, err := s.store.app(ctx, p.ClientID)
-		if err != nil || app.CallbackURL == "" {
-			return
-		}
-		st, err := s.outcome(ctx, p)
-		if err != nil || (st.status != "TS" && st.status != "TF") {
-			return
-		}
-		first, err := s.store.markNotified(ctx, p.ClientID, p.ID)
-		if err != nil || !first {
-			return
-		}
-		tx := callbackTransaction{ID: p.ID, Message: callbackMessage(p, app, st), StatusCode: st.status,
-			AirtelMoneyID: p.AirtelMoneyID}
-		body := map[string]any{"transaction": tx}
-		if app.CallbackKey != "" {
-			body["hash"] = callbackHash(app.CallbackKey, tx)
-		}
-		raw, _ := json.Marshal(body)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	rule, _, err := s.faults.Take(ctx, "airtel", faults.Callback, p.MSISDN)
+	cancel()
+	if err != nil {
+		s.logger.Error("callback rule", "err", err)
+	}
+	var wait time.Duration
+	if rule.Fault == faults.CallbackLate {
+		wait = rule.Delay
+	}
+	if until, err := time.Parse(bank.TimeLayout, p.AmbiguousUntil); err == nil {
+		wait += until.Sub(s.books.Clock().Now())
+	}
+	times := 1
+	if rule.Fault == faults.CallbackTwice {
+		times = 2
+	}
+	switch {
+	case rule.Fault == faults.CallbackNever:
+	case wait > 0:
+		s.books.Clock().AfterFunc(wait, func() { s.sends.Go(func() { s.deliver(p, times) }) })
+	case rule.Fault == faults.CallbackBeforeAnswer:
+		s.deliver(p, times)
+	default:
+		s.sends.Go(func() { s.deliver(p, times) })
+	}
+}
+
+// deliver posts the callback times times, if the payment has an outcome and no other call
+// has sent it.
+func (s *Service) deliver(p payment, times int) {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	app, err := s.store.app(ctx, p.ClientID)
+	if err != nil || app.CallbackURL == "" {
+		return
+	}
+	st, err := s.outcome(ctx, p)
+	if err != nil || (st.status != "TS" && st.status != "TF") {
+		return
+	}
+	first, err := s.store.markNotified(ctx, p.ClientID, p.ID)
+	if err != nil || !first {
+		return
+	}
+	tx := callbackTransaction{ID: p.ID, Message: callbackMessage(p, app, st), StatusCode: st.status,
+		AirtelMoneyID: p.AirtelMoneyID}
+	body := map[string]any{"transaction": tx}
+	if app.CallbackKey != "" {
+		body["hash"] = callbackHash(app.CallbackKey, tx)
+	}
+	raw, _ := json.Marshal(body)
+	for range times {
 		if err := s.send(ctx, app.CallbackURL, raw); err != nil {
 			s.logger.Info("callback not delivered, not retried", "id", p.ID, "err", err)
 		}
-	})
+	}
+}
+
+// answers are Airtel's replies to the faults Mbongo fakes, in its usual envelope.
+type answers struct{}
+
+func (answers) RateLimited(w http.ResponseWriter) {
+	refuse(w, http.StatusTooManyRequests, "429", "Too Many Requests")
+}
+
+func (answers) Maintenance(w http.ResponseWriter) {
+	refuse(w, http.StatusServiceUnavailable, "503", "Service Unavailable")
+}
+
+func (answers) TokenRevoked(w http.ResponseWriter) {
+	writeJSON(w, http.StatusUnauthorized, map[string]string{
+		"error": "invalid_token", "error_description": "The access token is invalid or expired"})
+}
+
+func (answers) Internal(w http.ResponseWriter) {
+	refuse(w, http.StatusInternalServerError, "ESB000001", "Internal error")
 }
 
 func callbackHash(key string, tx callbackTransaction) string {

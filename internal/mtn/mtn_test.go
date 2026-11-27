@@ -18,6 +18,7 @@ import (
 
 	"github.com/chrismoussounda/mbongo/internal/bank"
 	"github.com/chrismoussounda/mbongo/internal/clock"
+	"github.com/chrismoussounda/mbongo/internal/faults"
 	"github.com/chrismoussounda/mbongo/internal/mtn"
 )
 
@@ -34,9 +35,12 @@ type env struct {
 	books     *bank.Bank
 	clock     *clock.Manual
 	svc       *mtn.Service
+	rules     *faults.Injector
 	server    *httptest.Server
 	mu        sync.Mutex
 	callbacks []callback
+	// slowReceiver makes the shop's callback endpoint take its time.
+	slowReceiver time.Duration
 }
 
 func setup(t *testing.T) *env {
@@ -51,6 +55,7 @@ func setup(t *testing.T) *env {
 		func(_ context.Context, url string, body []byte) error {
 			var m map[string]any
 			_ = json.Unmarshal(body, &m)
+			time.Sleep(e.slowReceiver)
 			e.mu.Lock()
 			e.callbacks = append(e.callbacks, callback{url, m})
 			e.mu.Unlock()
@@ -59,6 +64,10 @@ func setup(t *testing.T) *env {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if e.rules, err = faults.New(e.ctx, e.books.DB()); err != nil {
+		t.Fatal(err)
+	}
+	e.svc.WithFaults(e.rules)
 	mux := http.NewServeMux()
 	e.svc.Routes(mux)
 	e.server = httptest.NewServer(mux)

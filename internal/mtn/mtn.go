@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/chrismoussounda/mbongo/internal/bank"
+	"github.com/chrismoussounda/mbongo/internal/faults"
 )
 
 const (
@@ -22,6 +23,8 @@ const (
 	approvalWindow = 5 * time.Minute
 	maxMessage     = 160
 	maxBody        = 64 << 10
+	// forever is the window of a payment a rule keeps stuck.
+	forever = 100 * 365 * 24 * time.Hour
 	// sandboxFloat is what a sandbox payout account starts with.
 	sandboxFloat = 1_000_000_000_00
 )
@@ -40,6 +43,7 @@ type Service struct {
 	logger *slog.Logger
 	send   Sender
 	sends  sync.WaitGroup
+	faults *faults.Injector
 }
 
 type Sender func(ctx context.Context, url string, body []byte) error
@@ -79,18 +83,29 @@ func put(client *http.Client) Sender {
 	}
 }
 
+// WithFaults lets rules make the service fail on purpose.
+func (s *Service) WithFaults(in *faults.Injector) *Service {
+	s.faults = in
+	return s
+}
+
+// Routes registers MTN's paths. Each one can be made to fail by a rule naming its operation:
+// apiuser, token, balance, accountholder, a payment operation, or status.
 func (s *Service) Routes(mux *http.ServeMux) {
-	mux.HandleFunc("POST /v1_0/apiuser", s.createAPIUser)
-	mux.HandleFunc("GET /v1_0/apiuser/{id}", s.getAPIUser)
-	mux.HandleFunc("POST /v1_0/apiuser/{id}/apikey", s.createAPIKey)
+	handle := func(pattern, operation string, h http.HandlerFunc) {
+		mux.Handle(pattern, s.faults.Wrap("mtn", operation, answers{}, h))
+	}
+	handle("POST /v1_0/apiuser", "apiuser", s.createAPIUser)
+	handle("GET /v1_0/apiuser/{id}", "apiuser", s.getAPIUser)
+	handle("POST /v1_0/apiuser/{id}/apikey", "apiuser", s.createAPIKey)
 	for _, product := range []string{collection, disbursement} {
-		mux.HandleFunc("POST /"+product+"/token/", s.issueToken(product))
-		mux.HandleFunc("GET /"+product+"/v1_0/account/balance", s.authorized(product, s.balance(product)))
-		mux.HandleFunc("GET /"+product+"/v1_0/accountholder/{type}/{id}/active", s.authorized(product, s.accountHolder))
+		handle("POST /"+product+"/token/", "token", s.issueToken(product))
+		handle("GET /"+product+"/v1_0/account/balance", "balance", s.authorized(product, s.balance(product)))
+		handle("GET /"+product+"/v1_0/accountholder/{type}/{id}/active", "accountholder", s.authorized(product, s.accountHolder))
 	}
 	for _, op := range []operation{opRequestToPay, opTransfer, opDeposit, opRefund} {
-		mux.HandleFunc("POST /"+op.product+"/v1_0/"+op.name, s.authorized(op.product, s.create(op)))
-		mux.HandleFunc("GET /"+op.product+"/v1_0/"+op.name+"/{ref}", s.authorized(op.product, s.status(op)))
+		handle("POST /"+op.product+"/v1_0/"+op.name, op.name, s.authorized(op.product, s.create(op)))
+		handle("GET /"+op.product+"/v1_0/"+op.name+"/{ref}", "status", s.authorized(op.product, s.status(op)))
 	}
 }
 
