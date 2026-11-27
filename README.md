@@ -16,8 +16,9 @@ early. At the end, it tells you what your app got wrong.
 
 ## Status
 
-Early work. MTN's collection and payout APIs work, in their sandbox flavour and their Congo flavour,
-on top of books where every movement adds up to zero. Failures on demand come in step 6.
+Early work. MTN's collection and payout APIs work, in their sandbox flavour and their Congo flavour, and
+so do Airtel Money Congo's collections, refunds, cash-in, cash-out and payouts, all on top of books where
+every movement adds up to zero. Failures on demand come in step 6.
 
 | Step | What | State |
 | --- | --- | --- |
@@ -25,7 +26,7 @@ on top of books where every movement adds up to zero. Failures on demand come in
 | 2 | Wallets, transactions, a clock you can move | done |
 | 3 | MTN collections | done |
 | 4 | MTN payouts | done |
-| 5 | Airtel Money | |
+| 5 | Airtel Money | done |
 | 6 | Failures on demand | |
 | 7 | A phone page to approve or ignore payments | |
 | 8 | A report on your integration | |
@@ -87,11 +88,30 @@ curl -X POST localhost:8080/_mbongo/mtn/<apiUser>/fund -H "Authorization: Bearer
   -d '{"amount":"250000"}'
 ```
 
+## Use it in place of Airtel
+
+Point your Airtel client at Mbongo instead of `openapiuat.airtel.cg`. Create an application, as on
+Airtel's portal; the answer has the client id and secret, and the PIN payouts need (1234 unless you
+give one). Callbacks go to `callbackUrl`, signed when you give a `callbackKey`:
+
+```sh
+curl -X POST localhost:8080/_mbongo/airtel/apps -H "Authorization: Bearer $MBONGO_ADMIN_TOKEN"   -d '{"name":"My Shop","callbackUrl":"https://shop.example/airtel","callbackKey":"secret"}'
+curl -X POST localhost:8080/_mbongo/customers -H "Authorization: Bearer $MBONGO_ADMIN_TOKEN"   -d '{"operator":"airtel","phone":"055123456","currency":"XAF","balance":"5000"}'
+# after your app asks for a payment (POST /merchant/v1/payments/):
+curl -X POST localhost:8080/_mbongo/airtel/<clientId>/payments/<transaction.id>/approve   -H "Authorization: Bearer $MBONGO_ADMIN_TOKEN"
+# before paying out (cash-in or disbursement):
+curl -X POST localhost:8080/_mbongo/airtel/<clientId>/fund -H "Authorization: Bearer $MBONGO_ADMIN_TOKEN"   -d '{"amount":"250000"}'
+```
+
+Encrypt the PIN with the key from `GET /v1/rsa/encryption-keys`, as with Airtel. Phone numbers have no
+242: a number sent with it is an unknown customer.
+
 ## How close to the real thing
 
 Every behaviour says where it comes from: the operator's documentation, a public SDK, a developer's
-report, or an assumption. For MTN, the documentation is first of all its API reference on
-[momodeveloper.mtn.com](https://momodeveloper.mtn.com/API-collections). See [docs/mtn.md](docs/mtn.md).
+report, what integrations do in practice, or an assumption. For MTN, the documentation is first of all
+its API reference on [momodeveloper.mtn.com](https://momodeveloper.mtn.com/API-collections); for Airtel,
+its Congo developer portal. See [docs/mtn.md](docs/mtn.md) and [docs/airtel.md](docs/airtel.md).
 The [lepresk/momo-api](https://github.com/lepresk/momo-api) client runs against Mbongo without changes,
 except for its deposits, which name a `payer` where MTN's reference wants a `payee`.
 
