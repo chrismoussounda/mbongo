@@ -24,6 +24,7 @@ import (
 	"github.com/chrismoussounda/mbongo/internal/airtel"
 	"github.com/chrismoussounda/mbongo/internal/bank"
 	"github.com/chrismoussounda/mbongo/internal/clock"
+	"github.com/chrismoussounda/mbongo/internal/faults"
 )
 
 var start = time.Date(2026, 11, 27, 9, 0, 0, 0, time.UTC)
@@ -40,6 +41,7 @@ type env struct {
 	clock     *clock.Manual
 	books     *bank.Bank
 	svc       *airtel.Service
+	rules     *faults.Injector
 	server    *httptest.Server
 	mu        sync.Mutex
 	callbacks []callback
@@ -65,6 +67,10 @@ func setup(t *testing.T) *env {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if e.rules, err = faults.New(e.ctx, e.books.DB()); err != nil {
+		t.Fatal(err)
+	}
+	e.svc.WithFaults(e.rules)
 	mux := http.NewServeMux()
 	e.svc.Routes(mux)
 	e.server = httptest.NewServer(mux)

@@ -52,6 +52,11 @@ CREATE TABLE airtel_payments (
 CREATE INDEX airtel_refunds ON airtel_payments (refund_of) WHERE refund_of != '';
 `
 
+// ambiguousUntil is when a payment a rule made ambiguous starts showing its real outcome.
+const ambiguousSchema = `
+ALTER TABLE airtel_payments ADD COLUMN ambiguous_until TEXT NOT NULL DEFAULT '';
+`
+
 var (
 	ErrNotFound    = errors.New("airtel: not found")
 	errDuplicate   = errors.New("airtel: transaction id already used")
@@ -75,7 +80,7 @@ type store struct {
 }
 
 func newStore(ctx context.Context, books *bank.Bank) (*store, error) {
-	if err := migrate.Run(ctx, books.DB(), "airtel", []string{schema}); err != nil {
+	if err := migrate.Run(ctx, books.DB(), "airtel", []string{schema, ambiguousSchema}); err != nil {
 		return nil, err
 	}
 	return &store{db: books.DB(), books: books}, nil
@@ -126,27 +131,29 @@ func (s *store) purgeTokens(ctx context.Context, now time.Time) error {
 }
 
 type payment struct {
-	ClientID      string
-	ID            string
-	Kind          string
-	TransactionID string
-	MSISDN        string
-	Amount        int64
-	Reference     string
-	AirtelMoneyID string
-	RefundOf      string
+	ClientID       string
+	ID             string
+	Kind           string
+	TransactionID  string
+	MSISDN         string
+	Amount         int64
+	Reference      string
+	AirtelMoneyID  string
+	RefundOf       string
+	AmbiguousUntil string
 }
 
-const paymentColumns = "client_id, id, kind, transaction_id, msisdn, amount, reference, airtel_money_id, refund_of"
+const paymentColumns = "client_id, id, kind, transaction_id, msisdn, amount, reference, airtel_money_id, refund_of, ambiguous_until"
 
 func (p *payment) fields() []any {
 	return []any{&p.ClientID, &p.ID, &p.Kind, &p.TransactionID, &p.MSISDN, &p.Amount, &p.Reference,
-		&p.AirtelMoneyID, &p.RefundOf}
+		&p.AirtelMoneyID, &p.RefundOf, &p.AmbiguousUntil}
 }
 
 func insertPayment(ctx context.Context, tx *sql.Tx, p payment) error {
-	_, err := tx.ExecContext(ctx, "INSERT INTO airtel_payments (family, "+paymentColumns+") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-		family(p.Kind), p.ClientID, p.ID, p.Kind, p.TransactionID, p.MSISDN, p.Amount, p.Reference, p.AirtelMoneyID, p.RefundOf)
+	_, err := tx.ExecContext(ctx, "INSERT INTO airtel_payments (family, "+paymentColumns+") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+		family(p.Kind), p.ClientID, p.ID, p.Kind, p.TransactionID, p.MSISDN, p.Amount, p.Reference, p.AirtelMoneyID, p.RefundOf,
+		p.AmbiguousUntil)
 	switch {
 	case !isUnique(err):
 		return err

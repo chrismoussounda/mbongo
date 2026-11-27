@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/chrismoussounda/mbongo/internal/bank"
+	"github.com/chrismoussounda/mbongo/internal/faults"
 )
 
 const (
@@ -21,6 +22,11 @@ const (
 	currency       = "XAF"
 	maxBody        = 64 << 10
 	defaultPIN     = "1234"
+	// forever is the window of a payment a rule keeps stuck.
+	forever = 100 * 365 * 24 * time.Hour
+	// ambiguousFor is how long a payment stays TA when the rule gives no delay; the docs ask
+	// to wait three minutes before asking for a status.
+	ambiguousFor = 3 * time.Minute
 )
 
 var ErrDecided = errors.New("airtel: only a pending collection can be approved or refused")
@@ -32,6 +38,7 @@ type Service struct {
 	send   Sender
 	sends  sync.WaitGroup
 	keyMu  sync.Mutex
+	faults *faults.Injector
 }
 
 type Sender func(ctx context.Context, url string, body []byte) error
@@ -74,22 +81,34 @@ func post(client *http.Client) Sender {
 	}
 }
 
+// WithFaults lets rules make the service fail on purpose.
+func (s *Service) WithFaults(in *faults.Injector) *Service {
+	s.faults = in
+	return s
+}
+
+// Routes registers Airtel's paths. Each one can be made to fail by a rule naming its
+// operation: token, keys, collection, refund, status, cashout, cashin, disbursement, balance
+// or user.
 func (s *Service) Routes(mux *http.ServeMux) {
-	mux.HandleFunc("POST /auth/oauth2/token", s.issueToken)
-	routes := map[string]func(http.ResponseWriter, *http.Request, App){
-		"GET /v1/rsa/encryption-keys":         s.encryptionKeys,
-		"POST /merchant/v1/payments/{$}":      s.collect,
-		"POST /standard/v1/payments/refund":   s.refund,
-		"GET /standard/v1/payments/{id}":      s.enquiry(kindCollection, kindCashOut, kindCashIn),
-		"POST /standard/v1/cashout/{$}":       s.cashOut,
-		"POST /standard/v1/cashin/{$}":        s.cashIn,
-		"POST /standard/v1/disbursements/{$}": s.disburse,
-		"GET /standard/v1/disbursements/{id}": s.enquiry(kindDisbursement),
-		"GET /standard/v1/users/balance":      s.balance,
-		"GET /standard/v1/users/{msisdn}":     s.user,
+	mux.Handle("POST /auth/oauth2/token", s.faults.Wrap("airtel", "token", answers{}, http.HandlerFunc(s.issueToken)))
+	routes := []struct {
+		pattern, operation string
+		h                  func(http.ResponseWriter, *http.Request, App)
+	}{
+		{"GET /v1/rsa/encryption-keys", "keys", s.encryptionKeys},
+		{"POST /merchant/v1/payments/{$}", kindCollection, s.collect},
+		{"POST /standard/v1/payments/refund", kindRefund, s.refund},
+		{"GET /standard/v1/payments/{id}", "status", s.enquiry(kindCollection, kindCashOut, kindCashIn)},
+		{"POST /standard/v1/cashout/{$}", kindCashOut, s.cashOut},
+		{"POST /standard/v1/cashin/{$}", kindCashIn, s.cashIn},
+		{"POST /standard/v1/disbursements/{$}", kindDisbursement, s.disburse},
+		{"GET /standard/v1/disbursements/{id}", "status", s.enquiry(kindDisbursement)},
+		{"GET /standard/v1/users/balance", "balance", s.balance},
+		{"GET /standard/v1/users/{msisdn}", "user", s.user},
 	}
-	for pattern, h := range routes {
-		mux.HandleFunc(pattern, s.authorized(h))
+	for _, rt := range routes {
+		mux.Handle(rt.pattern, s.faults.Wrap("airtel", rt.operation, answers{}, s.authorized(rt.h)))
 	}
 }
 
