@@ -12,6 +12,7 @@ import (
 
 	"github.com/chrismoussounda/mbongo/internal/airtel"
 	"github.com/chrismoussounda/mbongo/internal/bank"
+	"github.com/chrismoussounda/mbongo/internal/faults"
 	"github.com/chrismoussounda/mbongo/internal/money"
 	"github.com/chrismoussounda/mbongo/internal/mtn"
 )
@@ -21,21 +22,27 @@ type handler struct {
 	books  *bank.Bank
 	mtn    *mtn.Service
 	airtel *airtel.Service
+	faults *faults.Injector
 	logger *slog.Logger
 }
 
 // Routes does nothing without a token, so the admin API is off unless asked for.
-func Routes(mux *http.ServeMux, token string, books *bank.Bank, m *mtn.Service, a *airtel.Service, logger *slog.Logger) {
+func Routes(mux *http.ServeMux, token string, books *bank.Bank, m *mtn.Service, a *airtel.Service,
+	f *faults.Injector, logger *slog.Logger) {
 	if token == "" {
 		return
 	}
-	h := &handler{token: token, books: books, mtn: m, airtel: a, logger: logger}
+	h := &handler{token: token, books: books, mtn: m, airtel: a, faults: f, logger: logger}
 	mux.HandleFunc("POST /_mbongo/mtn/subscriptions", h.guard(h.subscription))
 	mux.HandleFunc("POST /_mbongo/mtn/api-users", h.guard(h.apiUser))
 	mux.HandleFunc("POST /_mbongo/customers", h.guard(h.customer))
 	mux.HandleFunc("POST /_mbongo/mtn/{user}/fund", h.guard(h.fund))
 	mux.HandleFunc("POST /_mbongo/mtn/{user}/requests/{ref}/approve", h.guard(h.decide(true)))
 	mux.HandleFunc("POST /_mbongo/mtn/{user}/requests/{ref}/refuse", h.guard(h.decide(false)))
+	mux.HandleFunc("POST /_mbongo/rules", h.guard(h.addRule))
+	mux.HandleFunc("GET /_mbongo/rules", h.guard(h.listRules))
+	mux.HandleFunc("DELETE /_mbongo/rules", h.guard(h.removeRule))
+	mux.HandleFunc("DELETE /_mbongo/rules/{id}", h.guard(h.removeRule))
 	mux.HandleFunc("POST /_mbongo/airtel/apps", h.guard(h.airtelApp))
 	mux.HandleFunc("POST /_mbongo/airtel/{client}/fund", h.guard(h.airtelFund))
 	mux.HandleFunc("POST /_mbongo/airtel/{client}/payments/{id}/approve", h.guard(h.airtelDecide(true)))

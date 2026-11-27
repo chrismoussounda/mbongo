@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -18,6 +19,7 @@ import (
 	"github.com/chrismoussounda/mbongo/internal/airtel"
 	"github.com/chrismoussounda/mbongo/internal/bank"
 	"github.com/chrismoussounda/mbongo/internal/clock"
+	"github.com/chrismoussounda/mbongo/internal/faults"
 	"github.com/chrismoussounda/mbongo/internal/mtn"
 )
 
@@ -45,10 +47,16 @@ func setup(t *testing.T, token string) *env {
 	if err != nil {
 		t.Fatal(err)
 	}
+	rules, err := faults.New(ctx, books.DB())
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.WithFaults(rules)
+	a.WithFaults(rules)
 	mux := http.NewServeMux()
 	m.Routes(mux)
 	a.Routes(mux)
-	admin.Routes(mux, token, books, m, a, logger)
+	admin.Routes(mux, token, books, m, a, rules, logger)
 	e := &env{t: t, server: httptest.NewServer(mux), books: books}
 	t.Cleanup(func() { e.server.Close(); m.Wait(); a.Wait(); _ = books.Close() })
 	return e
@@ -230,5 +238,64 @@ func TestAirtelAppPaysThroughTheAdmin(t *testing.T) {
 	_, s := e.call(http.MethodGet, "/standard/v1/payments/order-1", headers, nil)
 	if tx := s["data"].(map[string]any)["transaction"].(map[string]any); tx["status"] != "TS" {
 		t.Fatalf("status: %v", s)
+	}
+}
+
+func (e *env) adminCall(method, path string, body any) (int, any) {
+	e.t.Helper()
+	var reader io.Reader
+	if body != nil {
+		raw, _ := json.Marshal(body)
+		reader = bytes.NewReader(raw)
+	}
+	req, _ := http.NewRequestWithContext(context.Background(), method, e.server.URL+path, reader)
+	req.Header.Set("Authorization", "Bearer "+adminToken)
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	defer func() { _ = res.Body.Close() }()
+	var out any
+	_ = json.NewDecoder(res.Body).Decode(&out)
+	return res.StatusCode, out
+}
+
+func TestRulesThroughTheAdmin(t *testing.T) {
+	e := setup(t, adminToken)
+	for _, bad := range []map[string]any{
+		{"operator": "orange", "fault": "slow"},
+		{"operator": "mtn", "fault": "explode"},
+		{"operator": "mtn", "fault": "ambiguous"},
+		{"operator": "mtn", "fault": "slow", "times": -1},
+		{"operator": "mtn", "fault": "slow", "delaySeconds": -1},
+	} {
+		if status, out := e.admin("/_mbongo/rules", bad); status != 400 {
+			t.Errorf("%v: %d %v", bad, status, out)
+		}
+	}
+	status, out := e.admin("/_mbongo/rules", map[string]any{"operator": "mtn", "operation": "token", "fault": "maintenance"})
+	rule, _ := out["id"].(float64)
+	if status != 201 || rule == 0 || out["times"] != float64(1) {
+		t.Fatalf("add: %d %v", status, out)
+	}
+	_, slow := e.admin("/_mbongo/rules", map[string]any{"operator": "airtel", "fault": "slow", "times": 0})
+	if slow["delaySeconds"] != float64(30) || slow["times"] != float64(0) {
+		t.Fatalf("slow without a delay: %v", slow)
+	}
+	if status, list := e.adminCall(http.MethodGet, "/_mbongo/rules", nil); status != 200 || len(list.([]any)) != 2 {
+		t.Fatalf("list: %d %v", status, list)
+	}
+
+	if status, _ := e.call(http.MethodPost, "/collection/token/", nil, nil); status != 503 {
+		t.Fatalf("the rule should answer the token call: %d", status)
+	}
+	if status, _ := e.adminCall(http.MethodDelete, "/_mbongo/rules/"+strconv.Itoa(int(rule)), nil); status != 404 {
+		t.Fatalf("a spent rule is gone: %d", status)
+	}
+	if status, _ := e.adminCall(http.MethodDelete, "/_mbongo/rules", nil); status != 204 {
+		t.Fatalf("clear: %d", status)
+	}
+	if _, list := e.adminCall(http.MethodGet, "/_mbongo/rules", nil); len(list.([]any)) != 0 {
+		t.Fatalf("after clear: %v", list)
 	}
 }

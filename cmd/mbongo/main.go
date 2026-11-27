@@ -17,6 +17,7 @@ import (
 	"github.com/chrismoussounda/mbongo/internal/airtel"
 	"github.com/chrismoussounda/mbongo/internal/bank"
 	"github.com/chrismoussounda/mbongo/internal/clock"
+	"github.com/chrismoussounda/mbongo/internal/faults"
 	"github.com/chrismoussounda/mbongo/internal/janitor"
 	"github.com/chrismoussounda/mbongo/internal/mtn"
 	"github.com/chrismoussounda/mbongo/internal/server"
@@ -46,10 +47,15 @@ func run(ctx context.Context, getenv func(string) string, out io.Writer) error {
 	}
 	defer func() { _ = books.Close() }()
 
+	rules, err := faults.New(ctx, books.DB())
+	if err != nil {
+		return err
+	}
 	momo, err := mtn.New(ctx, books, logger, nil)
 	if err != nil {
 		return err
 	}
+	momo.WithFaults(rules)
 	defer momo.Wait()
 
 	airtelMoney, err := airtel.New(ctx, books, logger, nil)
@@ -57,6 +63,7 @@ func run(ctx context.Context, getenv func(string) string, out io.Writer) error {
 		return err
 	}
 	defer airtelMoney.Wait()
+	airtelMoney.WithFaults(rules)
 
 	sweepCtx, stopSweep := context.WithCancel(ctx)
 	swept := make(chan struct{})
@@ -71,7 +78,7 @@ func run(ctx context.Context, getenv func(string) string, out io.Writer) error {
 	srv := &http.Server{
 		Addr: address(getenv),
 		Handler: server.New(logger, version, books, momo.Routes, airtelMoney.Routes, func(mux *http.ServeMux) {
-			admin.Routes(mux, getenv("MBONGO_ADMIN_TOKEN"), books, momo, airtelMoney, logger)
+			admin.Routes(mux, getenv("MBONGO_ADMIN_TOKEN"), books, momo, airtelMoney, rules, logger)
 		}),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
