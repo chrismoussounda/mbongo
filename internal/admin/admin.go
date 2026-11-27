@@ -54,8 +54,12 @@ func (h *handler) subscription(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	key, err := h.mtn.CreateSubscription(r.Context(), in.Product)
+	if errors.Is(err, mtn.ErrUnknownProduct) {
+		h.refuse(w, "product must be collection")
+		return
+	}
 	if err != nil {
-		reply(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		h.internal(w, err)
 		return
 	}
 	reply(w, http.StatusCreated, map[string]string{"subscriptionKey": key})
@@ -71,8 +75,15 @@ func (h *handler) apiUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id, key, err := h.mtn.CreateAPIUser(r.Context(), in.SubscriptionKey, in.ProviderCallbackHost, in.TargetEnvironment)
-	if err != nil {
-		reply(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+	switch {
+	case errors.Is(err, mtn.ErrUnknownSubscription):
+		h.refuse(w, "unknown subscriptionKey")
+		return
+	case errors.Is(err, mtn.ErrUnknownEnvironment):
+		h.refuse(w, "targetEnvironment must be sandbox or mtncongo")
+		return
+	case err != nil:
+		h.internal(w, err)
 		return
 	}
 	reply(w, http.StatusCreated, map[string]string{"apiUser": id, "apiKey": key})
@@ -89,24 +100,27 @@ func (h *handler) customer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if in.Operator != string(bank.MTN) && in.Operator != string(bank.Airtel) {
-		reply(w, http.StatusBadRequest, map[string]string{"error": "operator must be mtn or airtel"})
+		h.refuse(w, "operator must be mtn or airtel")
 		return
 	}
 	balance := int64(0)
 	if in.Balance != "" {
 		var err error
 		if balance, err = money.Parse(in.Balance, in.Currency); err != nil {
-			reply(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			h.refuse(w, "balance must be an amount in "+in.Currency+", such as 5000 or 50.00")
 			return
 		}
 	}
 	a, err := h.books.OpenCustomer(r.Context(), bank.Operator(in.Operator), in.Phone, in.Currency, balance)
 	switch {
 	case errors.Is(err, bank.ErrExists):
-		reply(w, http.StatusConflict, map[string]string{"error": err.Error()})
+		reply(w, http.StatusConflict, map[string]string{"error": "this customer already exists"})
 		return
-	case errors.Is(err, bank.ErrInvalid), errors.Is(err, bank.ErrCurrency):
-		reply(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+	case errors.Is(err, bank.ErrInvalid):
+		h.refuse(w, "phone is required")
+		return
+	case errors.Is(err, bank.ErrCurrency):
+		h.refuse(w, "currency must be XAF, XOF or EUR")
 		return
 	case err != nil:
 		h.internal(w, err)
@@ -137,6 +151,10 @@ func (h *handler) decide(approve bool) http.HandlerFunc {
 			h.internal(w, err)
 		}
 	}
+}
+
+func (h *handler) refuse(w http.ResponseWriter, message string) {
+	reply(w, http.StatusBadRequest, map[string]string{"error": message})
 }
 
 func (h *handler) internal(w http.ResponseWriter, err error) {

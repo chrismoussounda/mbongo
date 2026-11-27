@@ -56,8 +56,12 @@ const (
 	MTNCongo = "mtncongo"
 )
 
-// ErrNotFound is returned by Approve and Refuse for an unknown request.
-var ErrNotFound = errors.New("mtn: not found")
+var (
+	ErrNotFound            = errors.New("mtn: no such request")
+	ErrUnknownProduct      = errors.New("mtn: product must be collection")
+	ErrUnknownEnvironment  = errors.New("mtn: targetEnvironment must be sandbox or mtncongo")
+	ErrUnknownSubscription = errors.New("mtn: unknown subscription key")
+)
 
 var (
 	errDuplicate = errors.New("mtn: reference already used")

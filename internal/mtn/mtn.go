@@ -5,7 +5,7 @@ package mtn
 import (
 	"bytes"
 	"context"
-	"fmt"
+	"errors"
 	"log/slog"
 	"net/http"
 	"sync"
@@ -74,7 +74,7 @@ func (s *Service) Routes(mux *http.ServeMux) {
 // CreateSubscription issues a subscription key, as MTN's portal does.
 func (s *Service) CreateSubscription(ctx context.Context, product string) (string, error) {
 	if product != collection {
-		return "", fmt.Errorf("mtn: unknown product %q", product)
+		return "", ErrUnknownProduct
 	}
 	return s.store.addSubscription(ctx, product)
 }
@@ -82,10 +82,13 @@ func (s *Service) CreateSubscription(ctx context.Context, product string) (strin
 // CreateAPIUser makes a user with its key at once, as MTN's partner portal does for production.
 func (s *Service) CreateAPIUser(ctx context.Context, subscription, callbackHost, environment string) (id, key string, err error) {
 	if environment != Sandbox && environment != MTNCongo {
-		return "", "", fmt.Errorf("mtn: unknown environment %q", environment)
+		return "", "", ErrUnknownEnvironment
 	}
 	if _, err := s.store.subscriptionProduct(ctx, subscription); err != nil {
-		return "", "", fmt.Errorf("mtn: unknown subscription key: %w", err)
+		if errors.Is(err, ErrNotFound) {
+			return "", "", ErrUnknownSubscription
+		}
+		return "", "", err
 	}
 	id, key = newUUID(), randomHex()
 	err = s.store.addAPIUser(ctx, apiUser{ID: id, Subscription: subscription, CallbackHost: callbackHost,

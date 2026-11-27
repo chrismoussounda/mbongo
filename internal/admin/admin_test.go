@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -155,7 +156,8 @@ func TestBadInputs(t *testing.T) {
 		{"/_mbongo/customers", map[string]string{"operator": "mtn", "phone": "1", "currency": "ZZZ"}},
 	}
 	for _, c := range cases {
-		if status, body := e.admin(c.path, c.body); status != http.StatusBadRequest {
+		status, body := e.admin(c.path, c.body)
+		if msg, _ := body["error"].(string); status != http.StatusBadRequest || msg == "" || strings.Contains(msg, ":") {
 			t.Errorf("%s %v: %d %v", c.path, c.body, status, body)
 		}
 	}
