@@ -8,26 +8,21 @@ import (
 	"time"
 )
 
-// Clock is the part of the time package Mbongo uses.
 type Clock interface {
 	Now() time.Time
 	AfterFunc(d time.Duration, f func()) Timer
 }
 
-// Timer cancels a func scheduled with AfterFunc.
 type Timer interface {
-	// Stop reports whether it stopped the func before it ran.
 	Stop() bool
 }
 
-// Real is the wall clock.
 type Real struct{}
 
 func (Real) Now() time.Time { return time.Now().UTC() }
 
 func (Real) AfterFunc(d time.Duration, f func()) Timer { return time.AfterFunc(d, f) }
 
-// Manual moves only when Advance is called.
 type Manual struct {
 	mu      sync.Mutex
 	now     time.Time
@@ -70,8 +65,8 @@ func (t *manualTimer) Stop() bool {
 	return true
 }
 
-// Advance moves the clock forward by d, running each func that falls due at its own time,
-// including funcs scheduled by those funcs. Funcs run without the lock held.
+// Each due func sees the clock at its own time, funcs it schedules run too, and none
+// runs with the lock held.
 func (m *Manual) Advance(d time.Duration) {
 	m.mu.Lock()
 	end := m.now.Add(d)

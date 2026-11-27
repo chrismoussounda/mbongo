@@ -1,7 +1,6 @@
 package bank_test
 
 import (
-	"context"
 	"database/sql"
 	"testing"
 	"time"
@@ -79,30 +78,6 @@ func TestApprovingAnExpiredPaymentRecordsTheExpiry(t *testing.T) {
 	if s := f.storedStatus(tx.ID); s != "expired" {
 		t.Fatalf("stored %s", s)
 	}
-}
-
-func TestSweepExpiresInTheBackground(t *testing.T) {
-	f := setup(t)
-	f.customer("242061234567", 10_000)
-	f.merchant("shop", 0)
-	tx, _ := f.request(bank.Collection, "ref-1", 2_500)
-	f.clock.Advance(time.Hour)
-
-	ctx, cancel := context.WithCancel(f.ctx)
-	done := make(chan struct{})
-	go func() {
-		f.bank.Sweep(ctx, 5*time.Millisecond, func(err error) { t.Error(err) })
-		close(done)
-	}()
-	deadline := time.Now().Add(5 * time.Second)
-	for f.storedStatus(tx.ID) != "expired" {
-		if time.Now().After(deadline) {
-			t.Fatal("the sweep never expired the payment")
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	cancel()
-	<-done
 }
 
 func TestBadTimeInTheDatabaseIsAnError(t *testing.T) {

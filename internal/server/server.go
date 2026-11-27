@@ -1,4 +1,3 @@
-// Package server holds Mbongo's HTTP routes and the middleware around them.
 package server
 
 import (
@@ -9,15 +8,16 @@ import (
 	"time"
 )
 
-// Pinger reports whether storage answers.
 type Pinger interface {
 	Ping(ctx context.Context) error
 }
 
-// New returns the whole HTTP handler.
-func New(logger *slog.Logger, version string, store Pinger) http.Handler {
+func New(logger *slog.Logger, version string, store Pinger, routes ...func(*http.ServeMux)) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", health(logger, version, store))
+	for _, add := range routes {
+		add(mux)
+	}
 	return logRequests(logger, Recover(logger)(mux))
 }
 
@@ -64,7 +64,6 @@ func Recover(logger *slog.Logger) func(http.Handler) http.Handler {
 	}
 }
 
-// recorder remembers the status and whether anything was sent.
 type recorder struct {
 	http.ResponseWriter
 	status int

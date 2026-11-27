@@ -2,6 +2,7 @@ package bank_test
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"path/filepath"
 	"testing"
@@ -311,4 +312,20 @@ func TestStateSurvivesARestart(t *testing.T) {
 		t.Fatalf("%+v, %v", got, err)
 	}
 	f.check()
+}
+
+func TestRequestWithSavesNothingWhenTheExtraStepFails(t *testing.T) {
+	f := setup(t)
+	f.customer("242061234567", 10_000)
+	f.merchant("shop", 0)
+	boom := errors.New("boom")
+	_, err := f.bank.RequestWith(f.ctx, bank.Request{Kind: bank.Collection, Operator: bank.MTN, Merchant: "shop",
+		Phone: "242061234567", Amount: 100, Currency: "XAF", PartnerRef: "ref-1"},
+		func(*sql.Tx, bank.Transaction) error { return boom })
+	if !errors.Is(err, boom) {
+		t.Fatalf("err = %v", err)
+	}
+	if _, err := f.bank.ByPartnerRef(f.ctx, bank.MTN, "shop", "ref-1"); !errors.Is(err, bank.ErrNotFound) {
+		t.Fatalf("the transaction was kept: %v", err)
+	}
 }

@@ -22,13 +22,11 @@ var decimals = map[string]int{
 	"EUR": 2,
 }
 
-// Known reports whether the currency is supported.
 func Known(currency string) bool {
 	_, ok := decimals[currency]
 	return ok
 }
 
-// Parse reads a positive amount such as "2500" or "10.50" into the smallest unit.
 // Trailing zeros past the currency's decimals are accepted ("2500.00" francs).
 func Parse(s, currency string) (int64, error) {
 	d, ok := decimals[currency]
@@ -50,7 +48,6 @@ func Parse(s, currency string) (int64, error) {
 	return n, nil
 }
 
-// Format writes an amount in the smallest unit as text, with the currency's decimals.
 func Format(minor int64, currency string) (string, error) {
 	d, ok := decimals[currency]
 	if !ok {
