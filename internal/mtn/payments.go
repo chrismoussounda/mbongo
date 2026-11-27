@@ -30,13 +30,13 @@ type operation struct {
 	approval bool
 }
 
-func operationNamed(name string) operation {
+func operationNamed(name string) (operation, error) {
 	for _, op := range []operation{opRequestToPay, opTransfer, opDeposit, opRefund} {
 		if op.name == name {
-			return op
+			return op, nil
 		}
 	}
-	return opRequestToPay
+	return operation{}, fmt.Errorf("mtn: unknown operation %q", name)
 }
 
 var (
@@ -133,7 +133,7 @@ func (s *Service) create(op operation) func(http.ResponseWriter, *http.Request, 
 			return
 		}
 		if req.TransactionID.Valid && (u.Environment == Sandbox || !op.approval) {
-			s.execute(ctx, op, req)
+			s.execute(ctx, u, op, req)
 		}
 		w.WriteHeader(http.StatusAccepted)
 	}
@@ -181,11 +181,7 @@ func (s *Service) checkRefund(w http.ResponseWriter, r *http.Request, u apiUser,
 // customer has no wallet.
 func (s *Service) start(ctx context.Context, u apiUser, op operation, req *request, amount, refundable int64) error {
 	if u.Environment == Sandbox {
-		opening := int64(0)
-		if op.kind == bank.Collection {
-			opening = sandboxFloat
-		}
-		if _, err := s.books.OpenCustomer(ctx, bank.MTN, req.PartyID, req.Currency, opening); err != nil &&
+		if _, err := s.books.OpenCustomer(ctx, bank.MTN, req.PartyID, req.Currency, 0); err != nil &&
 			!errors.Is(err, bank.ErrExists) {
 			return err
 		}
@@ -227,7 +223,7 @@ func (s *Service) start(ctx context.Context, u apiUser, op operation, req *reque
 // execute decides at once: in the sandbox the way MTN's test numbers do, and for payouts
 // the way MTN runs them without asking anyone. A failure here leaves the payment pending
 // until it expires, as a glitch at MTN would.
-func (s *Service) execute(ctx context.Context, op operation, req request) {
+func (s *Service) execute(ctx context.Context, u apiUser, op operation, req request) {
 	id := req.TransactionID.String
 	var err error
 	switch {
@@ -238,13 +234,35 @@ func (s *Service) execute(ctx context.Context, op operation, req request) {
 	case req.PartyID == numberRejects && op.approval:
 		_, err = s.books.Refuse(ctx, id, bank.ReasonRefused)
 	default:
-		_, err = s.books.Approve(ctx, id)
+		err = s.approve(ctx, u, op, id)
 	}
 	if err != nil {
 		s.logger.Error("execute", "ref", req.ReferenceID, "err", err)
 		return
 	}
 	s.notify(req)
+}
+
+// approve moves the money. A sandbox payer always has enough (sdk: any number succeeds), so
+// they are topped up first, whatever was paid to or from them before.
+func (s *Service) approve(ctx context.Context, u apiUser, op operation, id string) error {
+	if u.Environment == Sandbox && op.kind == bank.Collection {
+		t, err := s.books.Transaction(ctx, id)
+		if err != nil {
+			return err
+		}
+		payer, err := s.books.Account(ctx, t.CustomerID)
+		if err != nil {
+			return err
+		}
+		if short := t.Amount - payer.Balance; short > 0 {
+			if _, err := s.books.Fund(ctx, payer.ID, short); err != nil {
+				return err
+			}
+		}
+	}
+	_, err := s.books.Approve(ctx, id)
+	return err
 }
 
 func (s *Service) status(op operation) func(http.ResponseWriter, *http.Request, apiUser) {
@@ -345,7 +363,7 @@ func failureCode(r bank.Reason, environment string) string {
 func reasonMessage(code string) string {
 	switch code {
 	case "NOT_ENOUGH_FUNDS":
-		return "The payer does not have enough funds."
+		return "There are not enough funds to complete the transaction."
 	case "APPROVAL_REJECTED":
 		return "The payer rejected the request."
 	case "EXPIRED":

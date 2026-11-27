@@ -211,3 +211,47 @@ func TestRefundsAtOnceNeverExceedThePayment(t *testing.T) {
 		t.Fatalf("%d refunds of 5 accepted on a payment of 20: %v", accepted, statuses)
 	}
 }
+
+func TestSandboxPayerAlwaysHasEnough(t *testing.T) {
+	e := setup(t)
+	d := e.user("disbursement", "sandbox")
+	c := e.merchant("sandbox")
+	_ = d.post("transfer", ref1, send("46733123453", "5", "EUR"))
+	_ = c.requestToPay(ref2, pay("46733123453", "25", "EUR"), nil)
+	if s := c.status(ref2); s.body["status"] != "SUCCESSFUL" {
+		t.Fatalf("a collection from a number paid before: %v", s.body)
+	}
+	_ = c.requestToPay(ref3, pay("46733123454", "40", "EUR"), nil)
+	if err := e.svc.Approve(e.ctx, c.user, ref3); err != nil {
+		t.Fatal(err)
+	}
+	if s := c.status(ref3); s.body["status"] != "SUCCESSFUL" {
+		t.Fatalf("a pending sandbox payment approved later: %v", s.body)
+	}
+	if err := e.books.Check(e.ctx); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestPayoutsSendTheirCallback(t *testing.T) {
+	e := setup(t)
+	c := e.merchant("sandbox")
+	d := e.user("disbursement", "sandbox")
+	_ = c.requestToPay(ref1, pay("46733123453", "20", "EUR"), nil)
+	h := map[string]string{"X-Callback-Url": "https://shop.example/payouts"}
+	_ = e.call(http.MethodPost, "/disbursement/v1_0/transfer", d.headers(map[string]string{"X-Reference-Id": ref2,
+		"X-Callback-Url": h["X-Callback-Url"]}), send("46733123453", "5", "EUR"))
+	_ = e.call(http.MethodPost, "/disbursement/v1_0/refund", d.headers(map[string]string{"X-Reference-Id": ref3,
+		"X-Callback-Url": h["X-Callback-Url"]}), refund(ref1, "5"))
+
+	got := e.waitCallbacks(2)
+	if len(got) != 2 {
+		t.Fatalf("callbacks: %+v", got)
+	}
+	for _, cb := range got {
+		payee, _ := cb.body["payee"].(map[string]any)
+		if cb.url != h["X-Callback-Url"] || cb.body["status"] != "SUCCESSFUL" || payee["partyId"] != "46733123453" {
+			t.Errorf("callback %+v", cb)
+		}
+	}
+}

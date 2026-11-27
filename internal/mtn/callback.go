@@ -28,7 +28,12 @@ func (s *Service) notify(req request) {
 			s.logger.Error("callback", "err", err)
 			return
 		}
-		body, err := s.statusBody(ctx, u, operationNamed(fresh.Operation), fresh)
+		op, err := operationNamed(fresh.Operation)
+		if err != nil {
+			s.logger.Error("callback", "err", err)
+			return
+		}
+		body, err := s.statusBody(ctx, u, op, fresh)
 		if err != nil {
 			s.logger.Error("callback", "err", err)
 			return

@@ -22,7 +22,7 @@ const (
 	approvalWindow = 5 * time.Minute
 	maxMessage     = 160
 	maxBody        = 64 << 10
-	// sandboxFloat is what a sandbox payout account and a sandbox payer start with (assumed).
+	// sandboxFloat is what a sandbox payout account starts with (assumed).
 	sandboxFloat = 1_000_000_000_00
 )
 
@@ -133,21 +133,20 @@ func (s *Service) Fund(ctx context.Context, user string, amount int64) (bank.Acc
 
 // Approve also sends the callback.
 func (s *Service) Approve(ctx context.Context, user, ref string) error {
-	return s.decide(ctx, user, ref, func(id string) error {
-		_, err := s.books.Approve(ctx, id)
-		return err
+	return s.decide(ctx, user, ref, func(u apiUser, op operation, id string) error {
+		return s.approve(ctx, u, op, id)
 	})
 }
 
 // Refuse also sends the callback.
 func (s *Service) Refuse(ctx context.Context, user, ref string) error {
-	return s.decide(ctx, user, ref, func(id string) error {
+	return s.decide(ctx, user, ref, func(_ apiUser, _ operation, id string) error {
 		_, err := s.books.Refuse(ctx, id, bank.ReasonRefused)
 		return err
 	})
 }
 
-func (s *Service) decide(ctx context.Context, user, ref string, f func(id string) error) error {
+func (s *Service) decide(ctx context.Context, user, ref string, f func(apiUser, operation, string) error) error {
 	r, err := s.store.request(ctx, user, ref)
 	if err != nil {
 		return err
@@ -155,7 +154,15 @@ func (s *Service) decide(ctx context.Context, user, ref string, f func(id string
 	if !r.TransactionID.Valid {
 		return bank.ErrDecided
 	}
-	if err := f(r.TransactionID.String); err != nil {
+	u, err := s.store.apiUser(ctx, user)
+	if err != nil {
+		return err
+	}
+	op, err := operationNamed(r.Operation)
+	if err != nil {
+		return err
+	}
+	if err := f(u, op, r.TransactionID.String); err != nil {
 		return err
 	}
 	s.notify(r)
