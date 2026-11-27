@@ -2,7 +2,8 @@
 
 Each behaviour is tagged with its source:
 
-- **docs**: MTN's own pages ([callbacks](https://momoapi.mtn.com/content/html_widgets/lflwl.html),
+- **docs**: MTN's own API reference ([API Sandbox](https://momodeveloper.mtn.com/API-collections): Collection,
+  Disbursements and Sandbox User Provisioning, with each operation's headers, bodies and examples) and pages ([callbacks](https://momoapi.mtn.com/content/html_widgets/lflwl.html),
   [FAQ](https://momodeveloper.mtn.com/content/html_widgets/qoftb.html),
   [failure reasons](https://momodeveloper.mtn.com/content/html_widgets/4p5s8.html),
   [request to pay](https://momoapi.mtn.com/content/html_widgets/i5xpi.html),
@@ -50,7 +51,7 @@ Error bodies are `{"code", "message"}` (sdk, report).
 | Missing or wrong subscription key | 401, Azure API Management body `{"statusCode":401,"message":...}` | assumed |
 | Wrong API user or key on the token call | 401 `{"error":"login_failed"}` | assumed (sdk models a 401 with `error`) |
 | Missing, expired or other-product token | 401 `{"code":"...","message":...}` | assumed |
-| `X-Target-Environment` missing or not the user's | 403 `NOT_ALLOWED_TARGET_ENVIRONMENT` | docs (code), assumed (status) |
+| `X-Target-Environment` missing or not the user's | 403 `NOT_ALLOWED_TARGET_ENVIRONMENT` | docs (code; MTN's balance example puts it under 500), assumed (status) |
 | `X-Reference-Id` not a UUID | 400 `INVALID_REFERENCE_ID` | sdk (400), assumed (code) |
 | `X-Reference-Id` reused | 409 `RESOURCE_ALREADY_EXIST` | docs, report |
 | Unknown reference on status | 404 `RESOURCE_NOT_FOUND` | sdk |
@@ -70,21 +71,22 @@ its collections (assumed).
 
 | Call | Answer | Source |
 | --- | --- | --- |
-| `POST /disbursement/token/` | as for collection | sdk |
-| `POST /disbursement/v1_0/transfer` with `payee` | 202, then paid at once | sdk (paths), assumed (timing) |
-| `POST /disbursement/v1_0/deposit` with `payee` | 202, then paid at once | sdk |
-| `POST /disbursement/v1_0/refund` with `referenceIdToRefund` | 202, paid back to the original payer | sdk |
-| `GET /disbursement/v1_0/{transfer,deposit,refund}/{referenceId}` | 200 status body with `payee` | sdk |
-| `GET /disbursement/v1_0/account/balance`, `.../accountholder/...` | as for collection | sdk |
+| `POST /disbursement/token/` | as for collection | docs, sdk |
+| `POST /disbursement/v1_0/transfer` with `payee` | 202, then paid at once | docs (call), assumed (timing) |
+| `POST /disbursement/v1_0/deposit` with `payee` | 202, then paid at once | docs (call), assumed (timing) |
+| `POST /disbursement/v1_0/refund` with `referenceIdToRefund` and no `payee` | 202, paid back to the original payer | docs (call; the example id is `UUID-REQUEST-TO-PAY`), assumed (who is paid) |
+| `GET /disbursement/v1_0/{transfer,deposit,refund}/{referenceId}` | 200 status body with `payee` | docs, sdk |
+| `GET /disbursement/v1_0/account/balance`, `.../accountholder/...` | as for collection | docs, sdk |
 
-- Transfer and refund statuses leave out `payerMessage` and `payeeNote`; deposit keeps them (sdk).
+- Every status body carries `payerMessage` and `payeeNote`, as MTN's status schema shows for all
+  three (docs). Not built yet: `v2_0` deposit and refund, which MTN lists with the same body (docs).
 - Nobody approves a payout. It fails with the same low-balance reason as a collection when the
   account is short (assumed for Congo), and with `PAYEE_NOT_FOUND` for an unknown number in Congo.
 - Sandbox payout accounts start with plenty of euros; Congo ones start empty and are topped up with
   `POST /_mbongo/mtn/{apiUser}/fund` (assumed: MTN funds them outside the API).
 - The sandbox test numbers fail or stay pending as for collections; a payee can't reject (assumed).
-- Open question: the SDK sends `payer` on a deposit, while its own deposit status fixture shows
-  `payee`. Mbongo wants `payee` and answers 400 to `payer`, until a real sandbox settles it.
+- A deposit names the `payee` (docs). The lepresk client sends `payer` there, so Mbongo answers it
+  with 400, as the client's deposits would fail against MTN's own definition.
 - A refund needs a successful request to pay of the same partner, in the same environment, and all its
   refunds together can't pass the amount paid. Otherwise: 404 `RESOURCE_NOT_FOUND`, or 400
   `NOT_ALLOWED` (assumed).

@@ -90,8 +90,10 @@ curl -X POST localhost:8080/_mbongo/mtn/<apiUser>/fund -H "Authorization: Bearer
 ## How close to the real thing
 
 Every behaviour says where it comes from: the operator's documentation, a public SDK, a developer's
-report, or an assumption. See [docs/mtn.md](docs/mtn.md). The
-[lepresk/momo-api](https://github.com/lepresk/momo-api) client runs against Mbongo without changes.
+report, or an assumption. For MTN, the documentation is first of all its API reference on
+[momodeveloper.mtn.com](https://momodeveloper.mtn.com/API-collections). See [docs/mtn.md](docs/mtn.md).
+The [lepresk/momo-api](https://github.com/lepresk/momo-api) client runs against Mbongo without changes,
+except for its deposits, which name a `payer` where MTN's reference wants a `payee`.
 
 ## Licence
 
