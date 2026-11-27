@@ -184,22 +184,22 @@ func TestRefundNeedsASuccessfulPayment(t *testing.T) {
 	d := e.user("disbursement", "sandbox")
 	_ = c.requestToPay(ref1, pay("46733123451", "20", "EUR"), nil)
 
-	if a := d.post("refund", ref2, refund(ref1, "1")); a.status != 400 || a.body["code"] != "NOT_ALLOWED" {
+	if a := d.post("refund", ref2, refund(ref1, "1")); a.status != 500 || a.body["code"] != "TRANSACTION_NOT_FOUND" {
 		t.Fatalf("refund of a rejected payment: %d %v", a.status, a.body)
 	}
-	if a := d.post("refund", ref2, refund(ref3, "1")); a.status != 404 {
+	if a := d.post("refund", ref2, refund(ref3, "1")); a.status != 500 || a.body["code"] != "TRANSACTION_NOT_FOUND" {
 		t.Fatalf("refund of nothing: %d %v", a.status, a.body)
 	}
 	_ = d.post("transfer", ref3, send("46733123453", "20", "EUR"))
-	if a := d.post("refund", ref2, refund(ref3, "1")); a.status != 404 {
+	if a := d.post("refund", ref2, refund(ref3, "1")); a.status != 500 || a.body["code"] != "TRANSACTION_NOT_FOUND" {
 		t.Fatalf("refund of a transfer: %d %v", a.status, a.body)
 	}
 	stranger := e.partnerUser("another shop", "disbursement", "sandbox")
-	if a := stranger.post("refund", ref2, refund(ref1, "1")); a.status != 404 {
+	if a := stranger.post("refund", ref2, refund(ref1, "1")); a.status != 500 || a.body["code"] != "TRANSACTION_NOT_FOUND" {
 		t.Fatalf("refund of another partner's payment: %d %v", a.status, a.body)
 	}
 	congo := e.user("disbursement", "mtncongo")
-	if a := congo.post("refund", ref2, map[string]any{"amount": "1", "currency": "XAF", "referenceIdToRefund": ref1}); a.status != 404 {
+	if a := congo.post("refund", ref2, map[string]any{"amount": "1", "currency": "XAF", "referenceIdToRefund": ref1}); a.status != 500 || a.body["code"] != "TRANSACTION_NOT_FOUND" {
 		t.Fatalf("refund across environments: %d %v", a.status, a.body)
 	}
 }
@@ -270,5 +270,18 @@ func TestPayoutsSendTheirCallback(t *testing.T) {
 		if cb.url != h["X-Callback-Url"] || cb.body["status"] != "SUCCESSFUL" || payee["partyId"] != "46733123453" {
 			t.Errorf("callback %+v", cb)
 		}
+	}
+}
+
+func TestSandboxRefusesBalanceAndAccountHolder(t *testing.T) {
+	e := setup(t)
+	d := e.user("disbursement", "sandbox")
+	if b := d.get("/disbursement/v1_0/account/balance"); b.status != 500 || b.body["code"] != "NOT_ALLOWED" {
+		t.Fatalf("payout balance: %d %v", b.status, b.body)
+	}
+	c := e.merchant("sandbox")
+	a := e.call(http.MethodGet, "/collection/v1_0/accountholder/msisdn/46733123453/active", c.headers(nil), nil)
+	if a.status != 500 || a.body["code"] != "NOT_ALLOWED_TARGET_ENVIRONMENT" {
+		t.Fatalf("account holder: %d %v", a.status, a.body)
 	}
 }
