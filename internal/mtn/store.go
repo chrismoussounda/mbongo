@@ -11,27 +11,28 @@ import (
 	sqlite3 "modernc.org/sqlite/lib"
 
 	"github.com/chrismoussounda/mbongo/internal/bank"
+	"github.com/chrismoussounda/mbongo/internal/migrate"
 )
 
 const schema = `
-CREATE TABLE IF NOT EXISTS mtn_subscriptions (
+CREATE TABLE mtn_subscriptions (
     key     TEXT PRIMARY KEY,
     product TEXT NOT NULL CHECK (product IN ('collection', 'disbursement'))
 );
-CREATE TABLE IF NOT EXISTS mtn_api_users (
+CREATE TABLE mtn_api_users (
     id            TEXT PRIMARY KEY,
     subscription  TEXT NOT NULL REFERENCES mtn_subscriptions (key),
     callback_host TEXT NOT NULL,
     environment   TEXT NOT NULL CHECK (environment IN ('sandbox', 'mtncongo')),
     api_key       TEXT NOT NULL DEFAULT ''
 );
-CREATE TABLE IF NOT EXISTS mtn_tokens (
+CREATE TABLE mtn_tokens (
     token      TEXT PRIMARY KEY,
     api_user   TEXT NOT NULL REFERENCES mtn_api_users (id),
     product    TEXT NOT NULL,
     expires_at TEXT NOT NULL
 );
-CREATE TABLE IF NOT EXISTS mtn_requests (
+CREATE TABLE mtn_requests (
     api_user      TEXT NOT NULL REFERENCES mtn_api_users (id),
     reference_id  TEXT NOT NULL,
     product       TEXT NOT NULL,
@@ -83,7 +84,7 @@ type store struct {
 }
 
 func newStore(ctx context.Context, books *bank.Bank) (*store, error) {
-	if _, err := books.DB().ExecContext(ctx, schema); err != nil {
+	if err := migrate.Run(ctx, books.DB(), "mtn", []string{schema}); err != nil {
 		return nil, err
 	}
 	return &store{db: books.DB(), books: books}, nil
