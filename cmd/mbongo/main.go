@@ -1,4 +1,3 @@
-// Command mbongo runs the fake mobile money operator.
 package main
 
 import (
