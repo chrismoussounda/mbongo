@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/chrismoussounda/mbongo/internal/airtel"
 	"github.com/chrismoussounda/mbongo/internal/bank"
 	"github.com/chrismoussounda/mbongo/internal/money"
 	"github.com/chrismoussounda/mbongo/internal/mtn"
@@ -19,21 +20,26 @@ type handler struct {
 	token  string
 	books  *bank.Bank
 	mtn    *mtn.Service
+	airtel *airtel.Service
 	logger *slog.Logger
 }
 
 // Routes does nothing without a token, so the admin API is off unless asked for.
-func Routes(mux *http.ServeMux, token string, books *bank.Bank, m *mtn.Service, logger *slog.Logger) {
+func Routes(mux *http.ServeMux, token string, books *bank.Bank, m *mtn.Service, a *airtel.Service, logger *slog.Logger) {
 	if token == "" {
 		return
 	}
-	h := &handler{token: token, books: books, mtn: m, logger: logger}
+	h := &handler{token: token, books: books, mtn: m, airtel: a, logger: logger}
 	mux.HandleFunc("POST /_mbongo/mtn/subscriptions", h.guard(h.subscription))
 	mux.HandleFunc("POST /_mbongo/mtn/api-users", h.guard(h.apiUser))
 	mux.HandleFunc("POST /_mbongo/customers", h.guard(h.customer))
 	mux.HandleFunc("POST /_mbongo/mtn/{user}/fund", h.guard(h.fund))
 	mux.HandleFunc("POST /_mbongo/mtn/{user}/requests/{ref}/approve", h.guard(h.decide(true)))
 	mux.HandleFunc("POST /_mbongo/mtn/{user}/requests/{ref}/refuse", h.guard(h.decide(false)))
+	mux.HandleFunc("POST /_mbongo/airtel/apps", h.guard(h.airtelApp))
+	mux.HandleFunc("POST /_mbongo/airtel/{client}/fund", h.guard(h.airtelFund))
+	mux.HandleFunc("POST /_mbongo/airtel/{client}/payments/{id}/approve", h.guard(h.airtelDecide(true)))
+	mux.HandleFunc("POST /_mbongo/airtel/{client}/payments/{id}/refuse", h.guard(h.airtelDecide(false)))
 }
 
 func (h *handler) guard(next http.HandlerFunc) http.HandlerFunc {

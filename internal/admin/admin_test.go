@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/chrismoussounda/mbongo/internal/admin"
+	"github.com/chrismoussounda/mbongo/internal/airtel"
 	"github.com/chrismoussounda/mbongo/internal/bank"
 	"github.com/chrismoussounda/mbongo/internal/clock"
 	"github.com/chrismoussounda/mbongo/internal/mtn"
@@ -40,11 +41,16 @@ func setup(t *testing.T, token string) *env {
 	if err != nil {
 		t.Fatal(err)
 	}
+	a, err := airtel.New(ctx, books, logger, func(context.Context, string, []byte) error { return nil })
+	if err != nil {
+		t.Fatal(err)
+	}
 	mux := http.NewServeMux()
 	m.Routes(mux)
-	admin.Routes(mux, token, books, m, logger)
+	a.Routes(mux)
+	admin.Routes(mux, token, books, m, a, logger)
 	e := &env{t: t, server: httptest.NewServer(mux), books: books}
-	t.Cleanup(func() { e.server.Close(); m.Wait(); _ = books.Close() })
+	t.Cleanup(func() { e.server.Close(); m.Wait(); a.Wait(); _ = books.Close() })
 	return e
 }
 
@@ -183,5 +189,46 @@ func TestFundAPayoutAccount(t *testing.T) {
 	}
 	if err := e.books.Check(context.Background()); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestAirtelAppPaysThroughTheAdmin(t *testing.T) {
+	e := setup(t, adminToken)
+	if status, _ := e.admin("/_mbongo/airtel/apps", map[string]string{}); status != 400 {
+		t.Fatalf("app without a name: %d", status)
+	}
+	status, app := e.admin("/_mbongo/airtel/apps", map[string]string{"name": "Shop", "callbackUrl": "https://shop.example/cb"})
+	if status != 201 || app["clientId"] == "" || app["clientSecret"] == "" || app["pin"] != "1234" {
+		t.Fatalf("app: %d %v", status, app)
+	}
+	client := app["clientId"].(string)
+	if status, out := e.admin("/_mbongo/airtel/"+client+"/fund", map[string]string{"amount": "2500"}); status != 200 || out["balance"] != "2500" {
+		t.Fatalf("fund: %d %v", status, out)
+	}
+	if status, _ := e.admin("/_mbongo/airtel/nobody/fund", map[string]string{"amount": "1"}); status != 404 {
+		t.Fatalf("fund unknown app: %d", status)
+	}
+	if status, _ := e.admin("/_mbongo/customers", map[string]string{"operator": "airtel", "phone": "055000001", "currency": "XAF", "balance": "1000"}); status != 201 {
+		t.Fatalf("customer: %d", status)
+	}
+
+	_, tok := e.call(http.MethodPost, "/auth/oauth2/token", nil, map[string]string{
+		"client_id": client, "client_secret": app["clientSecret"].(string), "grant_type": "client_credentials"})
+	headers := map[string]string{"Authorization": "Bearer " + tok["access_token"].(string), "X-Country": "CG", "X-Currency": "XAF"}
+	_, _ = e.call(http.MethodPost, "/merchant/v1/payments/", headers, map[string]any{"reference": "r",
+		"subscriber": map[string]string{"msisdn": "055000001"}, "transaction": map[string]any{"amount": 400, "id": "order-1"}})
+
+	if status, _ := e.admin("/_mbongo/airtel/"+client+"/payments/nothing/approve", nil); status != 404 {
+		t.Fatalf("approve unknown: %d", status)
+	}
+	if status, _ := e.admin("/_mbongo/airtel/"+client+"/payments/order-1/approve", nil); status != 204 {
+		t.Fatalf("approve: %d", status)
+	}
+	if status, _ := e.admin("/_mbongo/airtel/"+client+"/payments/order-1/refuse", nil); status != 409 {
+		t.Fatalf("refuse after approval: %d", status)
+	}
+	_, s := e.call(http.MethodGet, "/standard/v1/payments/order-1", headers, nil)
+	if tx := s["data"].(map[string]any)["transaction"].(map[string]any); tx["status"] != "TS" {
+		t.Fatalf("status: %v", s)
 	}
 }
