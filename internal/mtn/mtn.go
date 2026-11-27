@@ -18,15 +18,15 @@ const (
 	collection   = "collection"
 	disbursement = "disbursement"
 	tokenTTL     = time.Hour
-	// approvalWindow is how long a customer has to approve (docs).
+	// approvalWindow is how long a customer has to approve.
 	approvalWindow = 5 * time.Minute
 	maxMessage     = 160
 	maxBody        = 64 << 10
-	// sandboxFloat is what a sandbox payout account starts with (assumed).
+	// sandboxFloat is what a sandbox payout account starts with.
 	sandboxFloat = 1_000_000_000_00
 )
 
-// Sandbox test numbers (sdk).
+// Sandbox test numbers.
 const (
 	numberFails   = "46733123450"
 	numberRejects = "46733123451"
@@ -85,7 +85,7 @@ func (s *Service) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1_0/apiuser/{id}/apikey", s.createAPIKey)
 	for _, product := range []string{collection, disbursement} {
 		mux.HandleFunc("POST /"+product+"/token/", s.issueToken(product))
-		mux.HandleFunc("GET /"+product+"/v1_0/account/balance", s.authorized(product, s.balance))
+		mux.HandleFunc("GET /"+product+"/v1_0/account/balance", s.authorized(product, s.balance(product)))
 		mux.HandleFunc("GET /"+product+"/v1_0/accountholder/{type}/{id}/active", s.authorized(product, s.accountHolder))
 	}
 	for _, op := range []operation{opRequestToPay, opTransfer, opDeposit, opRefund} {

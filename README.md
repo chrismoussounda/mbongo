@@ -63,7 +63,7 @@ curl -X POST localhost:8080/_mbongo/mtn/subscriptions \
 
 **Sandbox:** create the API user and key through `/v1_0/apiuser`, exactly as with MTN. Payments are in
 euros, succeed at once, and MTN's test numbers fail on purpose (`46733123451` is rejected, `46733123452`
-times out).
+expires). As in MTN's sandbox, balance and account holder checks are refused.
 
 **Congo (`mtncongo`):** payments are in francs, and the payer needs a wallet and has to say yes:
 
@@ -108,8 +108,8 @@ Encrypt the PIN with the key from `GET /v1/rsa/encryption-keys`, as with Airtel.
 
 ## How close to the real thing
 
-Every behaviour says where it comes from: the operator's documentation, a public SDK, a developer's
-report, what integrations do in practice, or an assumption. For MTN, the documentation is first of all
+Every behaviour says where it comes from: the operator's sandbox, its documentation, a public SDK, a
+developer's report, what integrations do in practice, or an assumption. For MTN, the documentation is first of all
 its API reference on [momodeveloper.mtn.com](https://momodeveloper.mtn.com/API-collections); for Airtel,
 its Congo developer portal. See [docs/mtn.md](docs/mtn.md) and [docs/airtel.md](docs/airtel.md).
 The [lepresk/momo-api](https://github.com/lepresk/momo-api) client runs against Mbongo without changes,

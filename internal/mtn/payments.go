@@ -108,7 +108,7 @@ func (s *Service) readRequest(w http.ResponseWriter, r *http.Request, u apiUser,
 		return fail(http.StatusBadRequest, "VALIDATION_ERROR", "The request body is not valid JSON.")
 	}
 	if p.Currency != currency(u.Environment) {
-		return fail(http.StatusBadRequest, "INVALID_CURRENCY", "Currency not supported.")
+		return fail(http.StatusInternalServerError, "INVALID_CURRENCY", "Currency not supported.")
 	}
 	amount, err := money.Parse(p.Amount, p.Currency)
 	if err != nil || amount == 0 {
@@ -136,7 +136,8 @@ func (s *Service) readRequest(w http.ResponseWriter, r *http.Request, u apiUser,
 		customer = p.Payee
 	}
 	if customer.PartyIDType != "MSISDN" || !digitsOnly.MatchString(customer.PartyID) {
-		return fail(http.StatusBadRequest, "VALIDATION_ERROR", op.party+" must be an MSISDN in international format.")
+		w.WriteHeader(http.StatusBadRequest)
+		return request{}, 0, false
 	}
 	req.PartyID = customer.PartyID
 	return req, amount, true
@@ -145,7 +146,7 @@ func (s *Service) readRequest(w http.ResponseWriter, r *http.Request, u apiUser,
 var errOverRefund = errors.New("mtn: refund larger than what is left of the payment")
 
 // checkRefund allows a refund of a successful collection only, and returns its amount.
-// What is left to refund is checked when the refund is saved (assumed rules).
+// What is left to refund is checked when the refund is saved.
 func (s *Service) checkRefund(w http.ResponseWriter, r *http.Request, u apiUser, req *request) (int64, bool) {
 	ctx, of := r.Context(), req.RefundOf
 	partner, err := s.store.partner(ctx, u.Subscription)
@@ -155,7 +156,7 @@ func (s *Service) checkRefund(w http.ResponseWriter, r *http.Request, u apiUser,
 	}
 	original, err := s.store.collectionToRefund(ctx, of, u.Environment, partner)
 	if errors.Is(err, ErrNotFound) {
-		writeError(w, http.StatusNotFound, "RESOURCE_NOT_FOUND", "referenceIdToRefund was not found.")
+		transactionNotFound(w)
 		return 0, false
 	}
 	if err != nil {
@@ -173,11 +174,16 @@ func (s *Service) checkRefund(w http.ResponseWriter, r *http.Request, u apiUser,
 		return 0, false
 	}
 	if status.Status != "SUCCESSFUL" {
-		writeError(w, http.StatusBadRequest, "NOT_ALLOWED", "Only a successful payment can be refunded, up to its amount.")
+		transactionNotFound(w)
 		return 0, false
 	}
 	req.PartyID = original.PartyID
 	return paid, true
+}
+
+// transactionNotFound is MTN's answer to a refund of a payment that isn't there or wasn't paid.
+func transactionNotFound(w http.ResponseWriter) {
+	writeError(w, http.StatusInternalServerError, "TRANSACTION_NOT_FOUND", "The transaction could not be found")
 }
 
 // start saves the request together with its bank transaction, or alone, failed, when the
@@ -230,8 +236,10 @@ func (s *Service) execute(ctx context.Context, u apiUser, op operation, req requ
 	id := req.TransactionID.String
 	var err error
 	switch {
-	case req.PartyID == numberTimeout || req.PartyID == numberPending:
+	case req.PartyID == numberPending:
 		return
+	case req.PartyID == numberTimeout:
+		_, err = s.books.Refuse(ctx, id, "expired")
 	case req.PartyID == numberFails:
 		_, err = s.books.Refuse(ctx, id, "internal_processing_error")
 	case req.PartyID == numberRejects && op.approval:
@@ -246,8 +254,8 @@ func (s *Service) execute(ctx context.Context, u apiUser, op operation, req requ
 	s.notify(req)
 }
 
-// approve moves the money. A sandbox payer always has enough (sdk: any number succeeds), so
-// they are topped up first, whatever was paid to or from them before.
+// approve moves the money. A sandbox payer always has enough, so they are topped up first,
+// whatever was paid to or from them before.
 func (s *Service) approve(ctx context.Context, u apiUser, op operation, id string) error {
 	if u.Environment == Sandbox && op.kind == bank.Collection {
 		t, err := s.books.Transaction(ctx, id)
@@ -289,29 +297,16 @@ func (s *Service) status(op operation) func(http.ResponseWriter, *http.Request, 
 }
 
 type paymentStatus struct {
-	Amount                 string  `json:"amount"`
-	Currency               string  `json:"currency"`
-	FinancialTransactionID string  `json:"financialTransactionId,omitempty"`
-	ExternalID             string  `json:"externalId"`
-	Payer                  *party  `json:"payer,omitempty"`
-	Payee                  *party  `json:"payee,omitempty"`
-	PayerMessage           string  `json:"payerMessage"`
-	PayeeNote              string  `json:"payeeNote"`
-	Status                 string  `json:"status"`
-	Reason                 *reason `json:"reason,omitempty"`
-}
-
-// reason is an object in the sandbox but a bare code in Congo (sdk).
-type reason struct {
-	Code string
-	Bare bool
-}
-
-func (r reason) MarshalJSON() ([]byte, error) {
-	if r.Bare {
-		return json.Marshal(r.Code)
-	}
-	return json.Marshal(map[string]string{"code": r.Code, "message": reasonMessage(r.Code)})
+	Amount                 string `json:"amount"`
+	Currency               string `json:"currency"`
+	FinancialTransactionID string `json:"financialTransactionId,omitempty"`
+	ExternalID             string `json:"externalId"`
+	Payer                  *party `json:"payer,omitempty"`
+	Payee                  *party `json:"payee,omitempty"`
+	PayerMessage           string `json:"payerMessage"`
+	PayeeNote              string `json:"payeeNote"`
+	Status                 string `json:"status"`
+	Reason                 string `json:"reason,omitempty"`
 }
 
 func (s *Service) statusBody(ctx context.Context, u apiUser, op operation, req request) (paymentStatus, error) {
@@ -342,7 +337,7 @@ func (s *Service) statusBody(ctx context.Context, u apiUser, op operation, req r
 		}
 	}
 	if body.Status == "FAILED" {
-		body.Reason = &reason{Code: code, Bare: u.Environment != Sandbox}
+		body.Reason = code
 	}
 	return body, nil
 }
@@ -361,35 +356,29 @@ func failureCode(r bank.Reason, environment string) string {
 	}
 }
 
-func reasonMessage(code string) string {
-	switch code {
-	case "NOT_ENOUGH_FUNDS":
-		return "There are not enough funds to complete the transaction."
-	case "APPROVAL_REJECTED":
-		return "The payer rejected the request."
-	case "EXPIRED":
-		return "The payer did not approve in time."
-	case "PAYER_NOT_FOUND":
-		return "The payer was not found."
-	case "PAYEE_NOT_FOUND":
-		return "The payee was not found."
-	default:
-		return "The transaction could not be processed."
+// balance is refused in the sandbox, as MTN's sandbox refuses it.
+func (s *Service) balance(product string) func(http.ResponseWriter, *http.Request, apiUser) {
+	return func(w http.ResponseWriter, r *http.Request, u apiUser) {
+		if u.Environment == Sandbox && product == collection {
+			writeError(w, http.StatusNotFound, "RESOURCE_NOT_FOUND", "Requested resource was not found.")
+			return
+		}
+		if u.Environment == Sandbox {
+			writeError(w, http.StatusInternalServerError, "NOT_ALLOWED", "Authorization failed. Insufficient permissions.")
+			return
+		}
+		a, err := s.store.merchant(r.Context(), u.ID)
+		if err != nil {
+			s.internal(w, err)
+			return
+		}
+		amount, err := money.Format(a.Balance, a.Currency)
+		if err != nil {
+			s.internal(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"availableBalance": amount, "currency": a.Currency})
 	}
-}
-
-func (s *Service) balance(w http.ResponseWriter, r *http.Request, u apiUser) {
-	a, err := s.store.merchant(r.Context(), u.ID)
-	if err != nil {
-		s.internal(w, err)
-		return
-	}
-	amount, err := money.Format(a.Balance, a.Currency)
-	if err != nil {
-		s.internal(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]string{"availableBalance": amount, "currency": a.Currency})
 }
 
 func (s *Service) accountHolder(w http.ResponseWriter, r *http.Request, u apiUser) {
@@ -397,14 +386,14 @@ func (s *Service) accountHolder(w http.ResponseWriter, r *http.Request, u apiUse
 		writeError(w, http.StatusBadRequest, "VALIDATION_ERROR", "Only msisdn is supported.")
 		return
 	}
-	active := u.Environment == Sandbox
-	if !active {
-		var err error
-		active, err = s.store.hasCustomer(r.Context(), r.PathValue("id"), currency(u.Environment))
-		if err != nil {
-			s.internal(w, err)
-			return
-		}
+	if u.Environment == Sandbox {
+		wrongEnvironment(w)
+		return
+	}
+	active, err := s.store.hasCustomer(r.Context(), r.PathValue("id"), currency(u.Environment))
+	if err != nil {
+		s.internal(w, err)
+		return
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"result": active})
 }

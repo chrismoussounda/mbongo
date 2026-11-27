@@ -15,11 +15,7 @@ func (s *Service) issueToken(product string) http.HandlerFunc {
 		id, secret, ok := r.BasicAuth()
 		u, err := s.store.apiUser(r.Context(), id)
 		if !ok || err != nil || u.Subscription != key || u.APIKey == "" || u.APIKey != secret {
-			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "login_failed"})
-			return
-		}
-		if r.Header.Get("X-Target-Environment") != u.Environment {
-			wrongEnvironment(w)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "login_failed"})
 			return
 		}
 		token, err := s.store.addToken(r.Context(), u.ID, product, s.books.Clock().Now().Add(tokenTTL))
@@ -67,12 +63,12 @@ func (s *Service) authorized(product string, next func(http.ResponseWriter, *htt
 	}
 }
 
-// apimDenied copies the gateway's answer to a missing or wrong subscription key (assumed).
+// apimDenied copies the gateway's answer to a missing or wrong subscription key.
 func apimDenied(w http.ResponseWriter) {
 	writeJSON(w, http.StatusUnauthorized, map[string]any{"statusCode": 401,
 		"message": "Access denied due to invalid subscription key. Make sure to provide a valid key for an active subscription."})
 }
 
 func wrongEnvironment(w http.ResponseWriter) {
-	writeError(w, http.StatusForbidden, "NOT_ALLOWED_TARGET_ENVIRONMENT", "Access to target environment is forbidden.")
+	writeError(w, http.StatusInternalServerError, "NOT_ALLOWED_TARGET_ENVIRONMENT", "Access to target environment is forbidden.")
 }

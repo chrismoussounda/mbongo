@@ -3,7 +3,7 @@
 Each behaviour is tagged with its source:
 
 - **docs**: Airtel's developer portal for Congo, [developers.airtel.cg](https://developers.airtel.cg/documentation)
-  (sign-in needed), read in November 2026 and restated here in our own words.
+  (sign-in needed), restated here in our own words.
 - **practice**: what production integrations in Congo send and expect, where it differs from the docs.
 - **assumed**: neither says; Mbongo's own choice, to be checked against Airtel's staging.
 
