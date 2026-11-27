@@ -18,7 +18,7 @@ early. At the end, it tells you what your app got wrong.
 
 Early work. MTN's collection and payout APIs work, in their sandbox flavour and their Congo flavour, and
 so do Airtel Money Congo's collections, refunds, cash-in, cash-out and payouts, all on top of books where
-every movement adds up to zero. Failures on demand come in step 6.
+every movement adds up to zero. Tests can make either operator fail on purpose.
 
 | Step | What | State |
 | --- | --- | --- |
@@ -27,7 +27,7 @@ every movement adds up to zero. Failures on demand come in step 6.
 | 3 | MTN collections | done |
 | 4 | MTN payouts | done |
 | 5 | Airtel Money | done |
-| 6 | Failures on demand | |
+| 6 | Failures on demand | done |
 | 7 | A phone page to approve or ignore payments | |
 | 8 | A report on your integration | |
 | 9 | Checks against a public SDK, demo, write-up | |
@@ -105,6 +105,19 @@ curl -X POST localhost:8080/_mbongo/airtel/<clientId>/fund -H "Authorization: Be
 
 Encrypt the PIN with the key from `GET /v1/rsa/encryption-keys`, as with Airtel. Phone numbers have no
 242: a number sent with it is an unknown customer.
+
+## Make it fail
+
+Rules on the admin API make the next matching calls fail the way operators fail: the answer lost after
+the money moved, a 500 after the money moved, a slow answer, 429, 503, a revoked token, a payment stuck
+in progress, Airtel's ambiguous TA, and callbacks that never come, come twice, come late or come before
+the answer:
+
+```sh
+curl -X POST localhost:8080/_mbongo/rules -H "Authorization: Bearer $MBONGO_ADMIN_TOKEN"   -d '{"operator":"airtel","operation":"disbursement","fault":"ambiguous"}'
+```
+
+See [docs/faults.md](docs/faults.md).
 
 ## How close to the real thing
 
