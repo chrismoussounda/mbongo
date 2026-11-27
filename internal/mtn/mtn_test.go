@@ -446,6 +446,13 @@ func TestCongoFailuresUseBareReasons(t *testing.T) {
 	_ = e.svc.Approve(e.ctx, m.user, refs[1])
 	_ = e.svc.Refuse(e.ctx, m.user, refs[2])
 
+	_, _ = e.books.OpenCustomer(e.ctx, bank.MTN, "242069999999", "XAF", 1_000)
+	if a := m.requestToPay(refs[0], pay("242069999999", "100", "XAF"), nil); a.status != 409 {
+		t.Fatalf("reusing the reference of a payer-not-found request: %d", a.status)
+	}
+	if _, err := e.books.ByPartnerRef(e.ctx, bank.MTN, m.user, refs[0]); !errors.Is(err, bank.ErrNotFound) {
+		t.Fatalf("the refused duplicate left a bank transaction behind: %v", err)
+	}
 	want := []string{"PAYER_NOT_FOUND", "LOW_BALANCE_OR_PAYEE_LIMIT_REACHED_OR_NOT_ALLOWED", "APPROVAL_REJECTED"}
 	for i, ref := range refs {
 		if s := m.status(ref); s.body["status"] != "FAILED" || s.body["reason"] != want[i] {

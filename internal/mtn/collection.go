@@ -76,67 +76,71 @@ func (s *Service) requestToPay(w http.ResponseWriter, r *http.Request, u apiUser
 	req := request{APIUser: u.ID, ReferenceID: ref, Product: collection, PartyID: p.Payer.PartyID,
 		Amount: p.Amount, Currency: p.Currency, ExternalID: p.ExternalID, PayerMessage: p.PayerMessage,
 		PayeeNote: p.PayeeNote, CallbackURL: callback}
-	if err := s.store.insertRequest(ctx, req); err != nil {
-		if errors.Is(err, errDuplicate) {
-			writeError(w, http.StatusConflict, "RESOURCE_ALREADY_EXIST", "Duplicated reference id. Creation of resource failed.")
-			return
-		}
+	switch err := s.start(ctx, u, &req, amount); {
+	case errors.Is(err, errDuplicate):
+		writeError(w, http.StatusConflict, "RESOURCE_ALREADY_EXIST", "Duplicated reference id. Creation of resource failed.")
+		return
+	case err != nil:
 		s.internal(w, err)
 		return
 	}
-
-	if err := s.start(ctx, u, req, amount); err != nil {
-		s.internal(w, err)
-		return
+	if u.Environment == Sandbox {
+		s.playSandbox(ctx, req)
 	}
 	w.WriteHeader(http.StatusAccepted)
 }
 
 // start opens the bank transaction behind an accepted request and, in the sandbox,
 // plays the outcome the test numbers promise.
-func (s *Service) start(ctx context.Context, u apiUser, req request, amount int64) error {
-	sandbox := u.Environment == Sandbox
-	if sandbox {
+// start saves the request together with its bank transaction, or alone, failed, when the
+// payer has no wallet.
+func (s *Service) start(ctx context.Context, u apiUser, req *request, amount int64) error {
+	if u.Environment == Sandbox {
 		if _, err := s.books.OpenCustomer(ctx, bank.MTN, req.PartyID, req.Currency, 1_000_000_000_00); err != nil &&
 			!errors.Is(err, bank.ErrExists) {
 			return err
 		}
 	}
 	window := approvalWindow
-	if sandbox && req.PartyID == numberPending {
+	if u.Environment == Sandbox && req.PartyID == numberPending {
 		window = 24 * time.Hour
 	}
-	t, err := s.books.Request(ctx, bank.Request{Kind: bank.Collection, Operator: bank.MTN, Merchant: u.ID,
+	_, err := s.books.RequestWith(ctx, bank.Request{Kind: bank.Collection, Operator: bank.MTN, Merchant: u.ID,
 		Phone: req.PartyID, Amount: amount, Currency: req.Currency, PartnerRef: req.ReferenceID,
-		ExternalID: req.ExternalID, Window: window})
+		ExternalID: req.ExternalID, Window: window}, func(tx *sql.Tx, t bank.Transaction) error {
+		req.TransactionID = sql.NullString{String: t.ID, Valid: true}
+		return insertRequest(ctx, tx, *req)
+	})
 	switch {
+	case errors.Is(err, bank.ErrDuplicate):
+		return errDuplicate
 	case errors.Is(err, bank.ErrNoCustomer):
-		return s.store.setFailure(ctx, u.ID, req.ReferenceID, "PAYER_NOT_FOUND")
-	case err != nil:
-		return err
+		req.TransactionID = sql.NullString{}
+		req.Failure = "PAYER_NOT_FOUND"
+		return s.store.insertRequest(ctx, *req)
 	}
-	if err := s.store.setTransaction(ctx, u.ID, req.ReferenceID, t.ID); err != nil {
-		return err
-	}
-	req.TransactionID = sql.NullString{String: t.ID, Valid: true}
-	if !sandbox {
-		return nil
-	}
+	return err
+}
+
+// playSandbox decides at once the way MTN's sandbox test numbers do. A failure here leaves
+// the payment pending until it expires, as a glitch at MTN would.
+func (s *Service) playSandbox(ctx context.Context, req request) {
+	var err error
 	switch req.PartyID {
 	case numberTimeout, numberPending:
-		return nil
+		return
 	case numberFails:
-		_, err = s.books.Refuse(ctx, t.ID, "internal_processing_error")
+		_, err = s.books.Refuse(ctx, req.TransactionID.String, "internal_processing_error")
 	case numberRejects:
-		_, err = s.books.Refuse(ctx, t.ID, bank.ReasonRefused)
+		_, err = s.books.Refuse(ctx, req.TransactionID.String, bank.ReasonRefused)
 	default:
-		_, err = s.books.Approve(ctx, t.ID)
+		_, err = s.books.Approve(ctx, req.TransactionID.String)
 	}
 	if err != nil {
-		return err
+		s.logger.Error("sandbox decision", "ref", req.ReferenceID, "err", err)
+		return
 	}
 	s.notify(req)
-	return nil
 }
 
 func (s *Service) requestToPayStatus(w http.ResponseWriter, r *http.Request, u apiUser) {

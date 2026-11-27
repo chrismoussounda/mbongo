@@ -252,6 +252,12 @@ func (b *Bank) FindAccount(ctx context.Context, op Operator, kind AccountKind, n
 }
 
 func (b *Bank) Request(ctx context.Context, r Request) (Transaction, error) {
+	return b.RequestWith(ctx, r, nil)
+}
+
+// RequestWith also runs also in the same database transaction, so an operator's own
+// record of the request is saved with it or not at all.
+func (b *Bank) RequestWith(ctx context.Context, r Request, also func(*sql.Tx, Transaction) error) (Transaction, error) {
 	if r.Amount <= 0 || r.PartnerRef == "" || (r.Kind != Collection && r.Kind != Payout) {
 		return Transaction{}, ErrInvalid
 	}
@@ -298,7 +304,10 @@ func (b *Bank) Request(ctx context.Context, r Request) (Transaction, error) {
 		if isUnique(err) {
 			return ErrDuplicate
 		}
-		return err
+		if err != nil || also == nil {
+			return err
+		}
+		return also(tx, t)
 	})
 	if err != nil {
 		return Transaction{}, err

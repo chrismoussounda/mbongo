@@ -180,24 +180,23 @@ func (s *store) request(ctx context.Context, user, ref string) (request, error) 
 	return r, err
 }
 
+type execer interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+}
+
 func (s *store) insertRequest(ctx context.Context, r request) error {
-	_, err := s.db.ExecContext(ctx, `INSERT INTO mtn_requests (api_user, reference_id, product, party_id, amount,
-		currency, external_id, payer_message, payee_note, callback_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		r.APIUser, r.ReferenceID, r.Product, r.PartyID, r.Amount, r.Currency, r.ExternalID, r.PayerMessage,
-		r.PayeeNote, r.CallbackURL)
+	return insertRequest(ctx, s.db, r)
+}
+
+func insertRequest(ctx context.Context, db execer, r request) error {
+	_, err := db.ExecContext(ctx, `INSERT INTO mtn_requests (api_user, reference_id, product, transaction_id,
+		party_id, amount, currency, external_id, payer_message, payee_note, callback_url, failure)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		r.APIUser, r.ReferenceID, r.Product, r.TransactionID, r.PartyID, r.Amount, r.Currency, r.ExternalID,
+		r.PayerMessage, r.PayeeNote, r.CallbackURL, r.Failure)
 	if err != nil && isUnique(err) {
 		return errDuplicate
 	}
-	return err
-}
-
-func (s *store) setTransaction(ctx context.Context, user, ref, id string) error {
-	_, err := s.db.ExecContext(ctx, "UPDATE mtn_requests SET transaction_id = ? WHERE api_user = ? AND reference_id = ?", id, user, ref)
-	return err
-}
-
-func (s *store) setFailure(ctx context.Context, user, ref, code string) error {
-	_, err := s.db.ExecContext(ctx, "UPDATE mtn_requests SET failure = ? WHERE api_user = ? AND reference_id = ?", code, user, ref)
 	return err
 }
 
