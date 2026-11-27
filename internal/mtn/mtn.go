@@ -1,4 +1,4 @@
-// Package mtn answers like MTN MoMo's Open API. docs/mtn-collection.md says where each
+// Package mtn answers like MTN MoMo's Open API. docs/mtn.md says where each
 // behaviour comes from.
 package mtn
 
@@ -15,12 +15,15 @@ import (
 )
 
 const (
-	collection = "collection"
-	tokenTTL   = time.Hour
+	collection   = "collection"
+	disbursement = "disbursement"
+	tokenTTL     = time.Hour
 	// approvalWindow is how long a customer has to approve (docs).
 	approvalWindow = 5 * time.Minute
 	maxMessage     = 160
 	maxBody        = 64 << 10
+	// sandboxFloat is what a sandbox payout account and a sandbox payer start with (assumed).
+	sandboxFloat = 1_000_000_000_00
 )
 
 // Sandbox test numbers (sdk).
@@ -77,16 +80,20 @@ func (s *Service) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1_0/apiuser", s.createAPIUser)
 	mux.HandleFunc("GET /v1_0/apiuser/{id}", s.getAPIUser)
 	mux.HandleFunc("POST /v1_0/apiuser/{id}/apikey", s.createAPIKey)
-	mux.HandleFunc("POST /collection/token/", s.issueToken(collection))
-	mux.HandleFunc("POST /collection/v1_0/requesttopay", s.authorized(collection, s.requestToPay))
-	mux.HandleFunc("GET /collection/v1_0/requesttopay/{ref}", s.authorized(collection, s.requestToPayStatus))
-	mux.HandleFunc("GET /collection/v1_0/account/balance", s.authorized(collection, s.balance))
-	mux.HandleFunc("GET /collection/v1_0/accountholder/{type}/{id}/active", s.authorized(collection, s.accountHolder))
+	for _, product := range []string{collection, disbursement} {
+		mux.HandleFunc("POST /"+product+"/token/", s.issueToken(product))
+		mux.HandleFunc("GET /"+product+"/v1_0/account/balance", s.authorized(product, s.balance))
+		mux.HandleFunc("GET /"+product+"/v1_0/accountholder/{type}/{id}/active", s.authorized(product, s.accountHolder))
+	}
+	for _, op := range []operation{opRequestToPay, opTransfer, opDeposit, opRefund} {
+		mux.HandleFunc("POST /"+op.product+"/v1_0/"+op.name, s.authorized(op.product, s.create(op)))
+		mux.HandleFunc("GET /"+op.product+"/v1_0/"+op.name+"/{ref}", s.authorized(op.product, s.status(op)))
+	}
 }
 
 // CreateSubscription issues a subscription key, as MTN's portal does.
 func (s *Service) CreateSubscription(ctx context.Context, product string) (string, error) {
-	if product != collection {
+	if product != collection && product != disbursement {
 		return "", ErrUnknownProduct
 	}
 	return s.store.addSubscription(ctx, product)
@@ -107,6 +114,19 @@ func (s *Service) CreateAPIUser(ctx context.Context, subscription, callbackHost,
 	err = s.store.addAPIUser(ctx, apiUser{ID: id, Subscription: subscription, CallbackHost: callbackHost,
 		Environment: environment, APIKey: key})
 	return id, key, err
+}
+
+// Account is where an API user's collections land and its payouts are paid from.
+func (s *Service) Account(ctx context.Context, user string) (bank.Account, error) {
+	return s.store.merchant(ctx, user)
+}
+
+func (s *Service) Fund(ctx context.Context, user string, amount int64) (bank.Account, error) {
+	a, err := s.store.merchant(ctx, user)
+	if err != nil {
+		return a, err
+	}
+	return s.books.Fund(ctx, a.ID, amount)
 }
 
 // Approve also sends the callback.

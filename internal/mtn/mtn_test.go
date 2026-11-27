@@ -100,11 +100,17 @@ type merchant struct {
 	e                  *env
 	sub, user, key, at string
 	environment        string
+	product            string
 }
 
 func (e *env) merchant(environment string) *merchant {
 	e.t.Helper()
-	sub, err := e.svc.CreateSubscription(e.ctx, "collection")
+	return e.user("collection", environment)
+}
+
+func (e *env) user(product, environment string) *merchant {
+	e.t.Helper()
+	sub, err := e.svc.CreateSubscription(e.ctx, product)
 	if err != nil {
 		e.t.Fatal(err)
 	}
@@ -112,7 +118,7 @@ func (e *env) merchant(environment string) *merchant {
 	if err != nil {
 		e.t.Fatal(err)
 	}
-	m := &merchant{e: e, sub: sub, user: user, key: key, environment: environment}
+	m := &merchant{e: e, sub: sub, user: user, key: key, environment: environment, product: product}
 	m.at = m.token().body["access_token"].(string)
 	return m
 }
@@ -120,7 +126,11 @@ func (e *env) merchant(environment string) *merchant {
 func (m *merchant) token() answer {
 	req, _ := http.NewRequestWithContext(m.e.ctx, http.MethodPost, "http://x", nil)
 	req.SetBasicAuth(m.user, m.key)
-	return m.e.call(http.MethodPost, "/collection/token/", map[string]string{
+	product := m.product
+	if product == "" {
+		product = "collection"
+	}
+	return m.e.call(http.MethodPost, "/"+product+"/token/", map[string]string{
 		"Authorization": req.Header.Get("Authorization"), "Ocp-Apim-Subscription-Key": m.sub,
 		"X-Target-Environment": m.environment,
 	}, nil)
