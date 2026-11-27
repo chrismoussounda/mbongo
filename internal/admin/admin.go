@@ -31,6 +31,7 @@ func Routes(mux *http.ServeMux, token string, books *bank.Bank, m *mtn.Service, 
 	mux.HandleFunc("POST /_mbongo/mtn/subscriptions", h.guard(h.subscription))
 	mux.HandleFunc("POST /_mbongo/mtn/api-users", h.guard(h.apiUser))
 	mux.HandleFunc("POST /_mbongo/customers", h.guard(h.customer))
+	mux.HandleFunc("POST /_mbongo/mtn/{user}/fund", h.guard(h.fund))
 	mux.HandleFunc("POST /_mbongo/mtn/{user}/requests/{ref}/approve", h.guard(h.decide(true)))
 	mux.HandleFunc("POST /_mbongo/mtn/{user}/requests/{ref}/refuse", h.guard(h.decide(false)))
 }
@@ -55,7 +56,7 @@ func (h *handler) subscription(w http.ResponseWriter, r *http.Request) {
 	}
 	key, err := h.mtn.CreateSubscription(r.Context(), in.Product)
 	if errors.Is(err, mtn.ErrUnknownProduct) {
-		h.refuse(w, "product must be collection")
+		h.refuse(w, "product must be collection or disbursement")
 		return
 	}
 	if err != nil {
@@ -129,6 +130,35 @@ func (h *handler) customer(w http.ResponseWriter, r *http.Request) {
 	formatted, _ := money.Format(a.Balance, a.Currency)
 	reply(w, http.StatusCreated, map[string]string{"operator": in.Operator, "phone": a.Name,
 		"currency": a.Currency, "balance": formatted})
+}
+
+func (h *handler) fund(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Amount string `json:"amount"`
+	}
+	if !read(w, r, &in) {
+		return
+	}
+	a, err := h.mtn.Account(r.Context(), r.PathValue("user"))
+	if errors.Is(err, mtn.ErrNotFound) {
+		reply(w, http.StatusNotFound, map[string]string{"error": "no such API user"})
+		return
+	}
+	if err != nil {
+		h.internal(w, err)
+		return
+	}
+	amount, err := money.Parse(in.Amount, a.Currency)
+	if err != nil || amount == 0 {
+		h.refuse(w, "amount must be a positive amount in "+a.Currency)
+		return
+	}
+	if a, err = h.mtn.Fund(r.Context(), r.PathValue("user"), amount); err != nil {
+		h.internal(w, err)
+		return
+	}
+	balance, _ := money.Format(a.Balance, a.Currency)
+	reply(w, http.StatusOK, map[string]string{"balance": balance, "currency": a.Currency})
 }
 
 func (h *handler) decide(approve bool) http.HandlerFunc {
