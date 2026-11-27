@@ -1,4 +1,4 @@
-# MTN MoMo Collection: what Mbongo copies, and from where
+# MTN MoMo: what Mbongo copies, and from where
 
 Each behaviour is tagged with its source:
 
@@ -61,6 +61,31 @@ Error bodies are `{"code", "message"}` (sdk, report).
 Failure reasons in a FAILED status: `PAYER_NOT_FOUND`, `NOT_ENOUGH_FUNDS` (Congo:
 `LOW_BALANCE_OR_PAYEE_LIMIT_REACHED_OR_NOT_ALLOWED`), `APPROVAL_REJECTED`, `EXPIRED`,
 `INTERNAL_PROCESSING_ERROR` (docs, sdk).
+
+## Payouts (disbursement)
+
+A separate product, with its own subscription key, API user and token (docs).
+
+| Call | Answer | Source |
+| --- | --- | --- |
+| `POST /disbursement/token/` | as for collection | sdk |
+| `POST /disbursement/v1_0/transfer` with `payee` | 202, then paid at once | sdk (paths), assumed (timing) |
+| `POST /disbursement/v1_0/deposit` with `payee` | 202, then paid at once | sdk |
+| `POST /disbursement/v1_0/refund` with `referenceIdToRefund` | 202, paid back to the original payer | sdk |
+| `GET /disbursement/v1_0/{transfer,deposit,refund}/{referenceId}` | 200 status body with `payee` | sdk |
+| `GET /disbursement/v1_0/account/balance`, `.../accountholder/...` | as for collection | sdk |
+
+- Transfer and refund statuses leave out `payerMessage` and `payeeNote`; deposit keeps them (sdk).
+- Nobody approves a payout. It fails with the same low-balance reason as a collection when the
+  account is short (assumed for Congo), and with `PAYEE_NOT_FOUND` for an unknown number in Congo.
+- Sandbox payout accounts start with plenty of euros; Congo ones start empty and are topped up with
+  `POST /_mbongo/mtn/{apiUser}/fund` (assumed: MTN funds them outside the API).
+- The sandbox test numbers fail or stay pending as for collections; a payee can't reject (assumed).
+- Open question: the SDK sends `payer` on a deposit, while its own deposit status fixture shows
+  `payee`. Mbongo wants `payee` and answers 400 to `payer`, until a real sandbox settles it.
+- A refund needs a successful request to pay in the same environment (any API user), and all its
+  refunds together can't pass the amount paid. Otherwise: 404 `RESOURCE_NOT_FOUND`, or 400
+  `NOT_ALLOWED` (assumed).
 
 ## Callbacks
 
