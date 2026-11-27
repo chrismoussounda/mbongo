@@ -51,6 +51,21 @@ func TestSandboxTransferPaysAtOnce(t *testing.T) {
 	}
 }
 
+func TestATransferIgnoresAReferenceToRefund(t *testing.T) {
+	e := setup(t)
+	c := e.merchant("sandbox")
+	d := e.user("disbursement", "sandbox")
+	_ = c.requestToPay(ref1, pay("46733123453", "20", "EUR"), nil)
+	body := send("46733123453", "50", "EUR")
+	body["referenceIdToRefund"] = ref1
+	if a := d.post("transfer", ref2, body); a.status != 202 {
+		t.Fatalf("transfer: %d %v", a.status, a.body)
+	}
+	if a := d.post("refund", ref3, refund(ref1, "20")); a.status != 202 {
+		t.Fatalf("the transfer counted as a refund: %d %v", a.status, a.body)
+	}
+}
+
 func TestDepositEchoesTheMessages(t *testing.T) {
 	e := setup(t)
 	d := e.user("disbursement", "sandbox")

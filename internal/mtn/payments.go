@@ -67,61 +67,17 @@ var digitsOnly = regexp.MustCompile(`^[0-9]{6,15}$`)
 
 func (s *Service) create(op operation) func(http.ResponseWriter, *http.Request, apiUser) {
 	return func(w http.ResponseWriter, r *http.Request, u apiUser) {
-		ctx := r.Context()
-		ref := r.Header.Get("X-Reference-Id")
-		if !isUUID(ref) {
-			writeError(w, http.StatusBadRequest, "INVALID_REFERENCE_ID", "X-Reference-Id must be a UUID version 4.")
+		req, amount, ok := s.readRequest(w, r, u, op)
+		if !ok {
 			return
 		}
-		var p paymentBody
-		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBody)).Decode(&p); err != nil {
-			writeError(w, http.StatusBadRequest, "VALIDATION_ERROR", "The request body is not valid JSON.")
-			return
-		}
-		if p.Currency != currency(u.Environment) {
-			writeError(w, http.StatusBadRequest, "INVALID_CURRENCY", "Currency not supported.")
-			return
-		}
-		amount, err := money.Parse(p.Amount, p.Currency)
-		if err != nil || amount == 0 {
-			writeError(w, http.StatusBadRequest, "VALIDATION_ERROR", "amount is not a valid positive amount for this currency.")
-			return
-		}
-		if utf8.RuneCountInString(p.PayerMessage) > maxMessage || utf8.RuneCountInString(p.PayeeNote) > maxMessage {
-			writeError(w, http.StatusBadRequest, "VALIDATION_ERROR", "payerMessage and payeeNote are limited to 160 characters.")
-			return
-		}
-		callback := r.Header.Get("X-Callback-Url")
-		if callback != "" {
-			cu, err := url.Parse(callback)
-			if err != nil || cu.Hostname() != u.CallbackHost {
-				writeError(w, http.StatusBadRequest, "INVALID_CALLBACK_URL_HOST", "Callback URL host does not match the API user's providerCallbackHost.")
-				return
-			}
-		}
-		req := request{APIUser: u.ID, ReferenceID: ref, Product: op.product, Operation: op.name,
-			Amount: p.Amount, Currency: p.Currency, ExternalID: p.ExternalID, PayerMessage: p.PayerMessage,
-			PayeeNote: p.PayeeNote, CallbackURL: callback}
-
 		var refundable int64
 		if op == opRefund {
-			var ok bool
-			if refundable, ok = s.checkRefund(w, r, u, p.ReferenceIDToRefund, &req); !ok {
+			if refundable, ok = s.checkRefund(w, r, u, &req); !ok {
 				return
 			}
-		} else {
-			customer := p.Payer
-			if op.party == "payee" {
-				customer = p.Payee
-			}
-			if customer.PartyIDType != "MSISDN" || !digitsOnly.MatchString(customer.PartyID) {
-				writeError(w, http.StatusBadRequest, "VALIDATION_ERROR", op.party+" must be an MSISDN in international format.")
-				return
-			}
-			req.PartyID = customer.PartyID
 		}
-
-		switch err := s.start(ctx, u, op, &req, amount, refundable); {
+		switch err := s.start(r.Context(), u, op, &req, amount, refundable); {
 		case errors.Is(err, errDuplicate):
 			writeError(w, http.StatusConflict, "RESOURCE_ALREADY_EXIST", "Duplicated reference id. Creation of resource failed.")
 			return
@@ -133,18 +89,67 @@ func (s *Service) create(op operation) func(http.ResponseWriter, *http.Request, 
 			return
 		}
 		if req.TransactionID.Valid && (u.Environment == Sandbox || !op.approval) {
-			s.execute(ctx, u, op, req)
+			s.execute(r.Context(), u, op, req)
 		}
 		w.WriteHeader(http.StatusAccepted)
 	}
+}
+
+// readRequest checks the headers and body MTN checks, and answers the error itself.
+func (s *Service) readRequest(w http.ResponseWriter, r *http.Request, u apiUser, op operation) (request, int64, bool) {
+	fail := func(status int, code, message string) (request, int64, bool) {
+		writeError(w, status, code, message)
+		return request{}, 0, false
+	}
+	ref := r.Header.Get("X-Reference-Id")
+	if !isUUID(ref) {
+		return fail(http.StatusBadRequest, "INVALID_REFERENCE_ID", "X-Reference-Id must be a UUID version 4.")
+	}
+	var p paymentBody
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBody)).Decode(&p); err != nil {
+		return fail(http.StatusBadRequest, "VALIDATION_ERROR", "The request body is not valid JSON.")
+	}
+	if p.Currency != currency(u.Environment) {
+		return fail(http.StatusBadRequest, "INVALID_CURRENCY", "Currency not supported.")
+	}
+	amount, err := money.Parse(p.Amount, p.Currency)
+	if err != nil || amount == 0 {
+		return fail(http.StatusBadRequest, "VALIDATION_ERROR", "amount is not a valid positive amount for this currency.")
+	}
+	if utf8.RuneCountInString(p.PayerMessage) > maxMessage || utf8.RuneCountInString(p.PayeeNote) > maxMessage {
+		return fail(http.StatusBadRequest, "VALIDATION_ERROR", "payerMessage and payeeNote are limited to 160 characters.")
+	}
+	callback := r.Header.Get("X-Callback-Url")
+	if callback != "" {
+		cu, err := url.Parse(callback)
+		if err != nil || cu.Hostname() != u.CallbackHost {
+			return fail(http.StatusBadRequest, "INVALID_CALLBACK_URL_HOST", "Callback URL host does not match the API user's providerCallbackHost.")
+		}
+	}
+	req := request{APIUser: u.ID, ReferenceID: ref, Product: op.product, Operation: op.name,
+		Amount: p.Amount, Currency: p.Currency, ExternalID: p.ExternalID, PayerMessage: p.PayerMessage,
+		PayeeNote: p.PayeeNote, CallbackURL: callback}
+	if op == opRefund {
+		req.RefundOf = p.ReferenceIDToRefund
+		return req, amount, true
+	}
+	customer := p.Payer
+	if op.party == "payee" {
+		customer = p.Payee
+	}
+	if customer.PartyIDType != "MSISDN" || !digitsOnly.MatchString(customer.PartyID) {
+		return fail(http.StatusBadRequest, "VALIDATION_ERROR", op.party+" must be an MSISDN in international format.")
+	}
+	req.PartyID = customer.PartyID
+	return req, amount, true
 }
 
 var errOverRefund = errors.New("mtn: refund larger than what is left of the payment")
 
 // checkRefund allows a refund of a successful collection only, and returns its amount.
 // What is left to refund is checked when the refund is saved (assumed rules).
-func (s *Service) checkRefund(w http.ResponseWriter, r *http.Request, u apiUser, of string, req *request) (int64, bool) {
-	ctx := r.Context()
+func (s *Service) checkRefund(w http.ResponseWriter, r *http.Request, u apiUser, req *request) (int64, bool) {
+	ctx, of := r.Context(), req.RefundOf
 	partner, err := s.store.partner(ctx, u.Subscription)
 	if err != nil {
 		s.internal(w, err)
@@ -173,7 +178,7 @@ func (s *Service) checkRefund(w http.ResponseWriter, r *http.Request, u apiUser,
 		writeError(w, http.StatusBadRequest, "NOT_ALLOWED", "Only a successful payment can be refunded, up to its amount.")
 		return 0, false
 	}
-	req.PartyID, req.RefundOf = original.PartyID, of
+	req.PartyID = original.PartyID
 	return paid, true
 }
 

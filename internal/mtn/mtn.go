@@ -63,12 +63,15 @@ func (s *Service) PurgeTokens(ctx context.Context) error {
 
 func put(client *http.Client) Sender {
 	return func(ctx context.Context, u string, body []byte) error {
-		req, err := http.NewRequestWithContext(ctx, http.MethodPut, u, bytes.NewReader(body))
+		// Calling a URL chosen by the client is the point of a callback; readRequest already
+		// limits it to the host the API user registered, as MTN does.
+		req, err := http.NewRequestWithContext(ctx, http.MethodPut, u, bytes.NewReader(body)) //nolint:gosec // G704, see above
+
 		if err != nil {
 			return err
 		}
 		req.Header.Set("Content-Type", "application/json")
-		res, err := client.Do(req)
+		res, err := client.Do(req) //nolint:gosec // G704, see above
 		if err != nil {
 			return err
 		}
