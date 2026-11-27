@@ -466,6 +466,8 @@ func TestCongoFailuresUseBareReasons(t *testing.T) {
 func TestExpiredTokensArePurged(t *testing.T) {
 	e := setup(t)
 	e.merchant("sandbox")
+	e.clock.Advance(500 * time.Millisecond)
+	e.merchant("sandbox")
 	count := func() int {
 		var n int
 		if err := e.books.DB().QueryRowContext(e.ctx, "SELECT COUNT(*) FROM mtn_tokens").Scan(&n); err != nil {
@@ -473,13 +475,14 @@ func TestExpiredTokensArePurged(t *testing.T) {
 		}
 		return n
 	}
-	// Times with and without a fraction on either side of the hour: they must still compare right.
-	e.clock.Advance(time.Hour - 500*time.Millisecond)
-	if err := e.svc.PurgeTokens(e.ctx); err != nil || count() != 1 {
-		t.Fatalf("a live token was purged: %d left, %v", count(), err)
+	e.clock.Advance(time.Hour - time.Second)
+	if err := e.svc.PurgeTokens(e.ctx); err != nil || count() != 2 {
+		t.Fatalf("live tokens were purged: %d left, %v", count(), err)
 	}
+	// Now one token is exactly due, and the other is due half a second ago with no fraction in
+	// its stored time: both must go.
 	e.clock.Advance(time.Second)
 	if err := e.svc.PurgeTokens(e.ctx); err != nil || count() != 0 {
-		t.Fatalf("an expired token survived: %d left, %v", count(), err)
+		t.Fatalf("expired tokens survived: %d left, %v", count(), err)
 	}
 }
