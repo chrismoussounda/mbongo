@@ -56,7 +56,7 @@ func tokenPerCall(t *traffic) (Finding, bool) {
 	}
 	return Finding{Check: "token_per_call", Group: Hygiene, Severity: Warning, Calls: ids(early...),
 		Message: fmt.Sprintf("%d new tokens were asked for while the last one had more than half of its %s left. Keep a token until it nears its end, or until a call says it is no longer valid.",
-			len(early), life)}, true
+			len(early), human(life))}, true
 }
 
 // pollingTooFast finds status calls for one payment closer together than quickPoll.
@@ -82,7 +82,7 @@ func pollingTooFast(t *traffic) (Finding, bool) {
 	}
 	return Finding{Check: "polling_too_fast", Group: Hygiene, Severity: Warning, Calls: ids(quick...),
 		Message: fmt.Sprintf("The status of %s was asked again and again less than %s apart. Wait 20 to 25 seconds before the first check, then longer between each.",
-			list(refs), quickPoll)}, true
+			list(refs), human(quickPoll))}, true
 }
 
 // rateLimitIgnored finds calls sent right after a 429.
@@ -99,7 +99,7 @@ func rateLimitIgnored(t *traffic) (Finding, bool) {
 	}
 	return Finding{Check: "rate_limit_ignored", Group: Hygiene, Severity: Warning, Calls: ids(hurried...),
 		Message: fmt.Sprintf("%d calls came less than %s after a 429 Too Many Requests. Back off before trying again.",
-			len(hurried), rateLimitWait)}, true
+			len(hurried), human(rateLimitWait))}, true
 }
 
 // callbacksFailing finds callbacks the client's endpoint did not take.
@@ -147,7 +147,7 @@ func callbacksSlow(t *traffic) (Finding, bool) {
 	}
 	return Finding{Check: "callback_slow", Group: Hygiene, Severity: Warning, Reference: slowest.Reference,
 		Message: fmt.Sprintf("%d callbacks took more than %s to be answered (the slowest %s, for %s). Answer at once and do the work afterwards.",
-			slow, slowCallback, (time.Duration(slowest.Millis) * time.Millisecond).Round(100*time.Millisecond),
+			slow, human(slowCallback), human(time.Duration(slowest.Millis)*time.Millisecond),
 			slowest.Reference)}, true
 }
 
@@ -157,4 +157,20 @@ func list(refs []string) string {
 		return strings.Join(refs[:3], ", ") + fmt.Sprintf(" and %d more", len(refs)-3)
 	}
 	return strings.Join(refs, ", ")
+}
+
+// human writes a duration the way people say it: "1 h", "1 min 2 s", "4.5 s".
+func human(d time.Duration) string {
+	d = d.Round(100 * time.Millisecond)
+	var parts []string
+	if h := d / time.Hour; h > 0 {
+		parts = append(parts, fmt.Sprintf("%d h", h))
+	}
+	if m := d % time.Hour / time.Minute; m > 0 {
+		parts = append(parts, fmt.Sprintf("%d min", m))
+	}
+	if s := d % time.Minute; s > 0 || len(parts) == 0 {
+		parts = append(parts, strings.TrimSuffix(strings.TrimSuffix(fmt.Sprintf("%.1f", s.Seconds()), "0"), ".")+" s")
+	}
+	return strings.Join(parts, " ")
 }

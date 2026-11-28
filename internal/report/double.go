@@ -66,7 +66,7 @@ func paidTwice(t *traffic) []Finding {
 			found = append(found, Finding{Check: "payout_twice", Group: DoubleMoney, Severity: Warning,
 				Reference: b.reference, Calls: ids(ca, cb),
 				Message: fmt.Sprintf("%s %s was paid out twice to %s within %s (references %s and %s). If it was one payout, the second is a double payment.",
-					cb.Amount, cb.Currency, cb.Phone, cb.At.Sub(ca.At).Round(time.Second), a.reference, b.reference)})
+					cb.Amount, cb.Currency, cb.Phone, human(cb.At.Sub(ca.At)), a.reference, b.reference)})
 		}
 	}
 	return found

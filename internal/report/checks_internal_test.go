@@ -402,7 +402,7 @@ func TestMoneyTakenNeverConfirmed(t *testing.T) {
 		s.status("r1", Pending)
 		s.ends("r1", Successful)
 		f := s.expect("money_unconfirmed", Error, "r1")
-		if want := "stopped asking after 1m2s"; !contains(f.Message, want) {
+		if want := "stopped asking after 1 min 2 s"; !contains(f.Message, want) {
 			t.Fatalf("%q lacks %q", f.Message, want)
 		}
 	})
@@ -690,7 +690,7 @@ func TestACallbackEndpointSlow(t *testing.T) {
 	s := newScript(t)
 	s.callbackTaking("r1", Successful, 200, 2*time.Second)
 	s.callbackTaking("r2", Successful, 200, 4500*time.Millisecond)
-	if f := s.expect("callback_slow", Warning, "r2"); !contains(f.Message, "4.5s") || !contains(f.Message, "1 callbacks") {
+	if f := s.expect("callback_slow", Warning, "r2"); !contains(f.Message, "4.5 s") || !contains(f.Message, "1 callbacks") {
 		t.Fatalf("%q", f.Message)
 	}
 }
@@ -724,5 +724,14 @@ func TestEarlyTokensCountAgainAfterARenewal(t *testing.T) {
 	}
 	if f := s.expect("token_per_call", Warning, ""); len(f.Calls) != 3 {
 		t.Fatalf("%+v", f)
+	}
+}
+
+func TestDurationsReadLikePeopleSayThem(t *testing.T) {
+	for d, want := range map[time.Duration]string{time.Hour: "1 h", 180 * time.Second: "3 min", 62 * time.Second: "1 min 2 s",
+		4500 * time.Millisecond: "4.5 s", time.Second: "1 s", 0: "0 s", 90*time.Minute + 5*time.Second: "1 h 30 min 5 s"} {
+		if got := human(d); got != want {
+			t.Errorf("%s: %q, want %q", d, got, want)
+		}
 	}
 }

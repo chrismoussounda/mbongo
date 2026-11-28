@@ -54,7 +54,7 @@ func unfollowed(p *payment) (Finding, bool) {
 	}
 	how := "never asked for its status, and no callback reached it"
 	if last, ok := lastStatus(p); ok {
-		how = fmt.Sprintf("stopped asking after %s, when it was still pending", last.At.Sub(p.first().At).Round(time.Second))
+		how = fmt.Sprintf("stopped asking after %s, when it was still pending", human(last.At.Sub(p.first().At)))
 	}
 	if p.final == Successful {
 		return Finding{Check: "money_unconfirmed", Group: Trust, Severity: Error, Reference: p.reference,
