@@ -5,6 +5,7 @@ package airtel
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -169,3 +170,56 @@ func (s *Service) PurgeTokens(ctx context.Context) error {
 
 // Wait returns once callbacks already started are delivered or have failed.
 func (s *Service) Wait() { s.sends.Wait() }
+
+const waitingCollections = `SELECT p.transaction_id, a.name, p.reference
+	FROM airtel_payments p
+	JOIN transactions t ON t.id = p.transaction_id
+	JOIN airtel_apps a ON a.client_id = p.client_id
+	WHERE p.kind = 'collection' AND t.status = 'pending' AND t.expires_at > ?`
+
+// Prompts are the collections waiting for the payer's yes, oldest first.
+func (s *Service) Prompts(ctx context.Context, msisdn string) ([]bank.Prompt, error) {
+	return s.books.PromptsFrom(ctx, waitingCollections+" AND p.msisdn = ? ORDER BY t.created_at, t.id",
+		s.books.Clock().Now().UTC().Format(bank.TimeLayout), msisdn)
+}
+
+// Waiting is every number's prompts, oldest first.
+func (s *Service) Waiting(ctx context.Context) ([]bank.Prompt, error) {
+	return s.books.PromptsFrom(ctx, waitingCollections+" ORDER BY t.created_at, t.id",
+		s.books.Clock().Now().UTC().Format(bank.TimeLayout))
+}
+
+// Answer is the payer's yes or no to a collection, given by its bank transaction; it also
+// sends the callback.
+func (s *Service) Answer(ctx context.Context, transactionID string, approve bool) error {
+	var clientID, id string
+	err := s.store.db.QueryRowContext(ctx, `SELECT client_id, id FROM airtel_payments
+		WHERE transaction_id = ? AND kind = 'collection'`, transactionID).Scan(&clientID, &id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return bank.ErrNotFound
+	}
+	if err != nil {
+		return err
+	}
+	if approve {
+		err = s.Approve(ctx, clientID, id)
+	} else {
+		err = s.Refuse(ctx, clientID, id)
+	}
+	if errors.Is(err, ErrDecided) {
+		return bank.ErrDecided
+	}
+	return err
+}
+
+// Describe is what the customer's phone shows about a transaction: the app on the other side
+// and its Airtel Money ID.
+func (s *Service) Describe(ctx context.Context, t bank.Transaction) (counterparty, ref string, err error) {
+	err = s.store.db.QueryRowContext(ctx, `SELECT a.name, p.airtel_money_id FROM airtel_payments p
+		JOIN airtel_apps a ON a.client_id = p.client_id
+		WHERE p.transaction_id = ?`, t.ID).Scan(&counterparty, &ref)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", "", bank.ErrNotFound
+	}
+	return counterparty, ref, err
+}

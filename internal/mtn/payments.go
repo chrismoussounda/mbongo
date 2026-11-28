@@ -64,6 +64,17 @@ type paymentBody struct {
 
 var digitsOnly = regexp.MustCompile(`^[0-9]{6,15}$`)
 
+// congoNumber is an MTN Congo line in the form the API takes: 242, then 06 and seven digits.
+// Only such numbers become automatic customers; others stay unknown, as at MTN.
+var congoNumber = regexp.MustCompile(`^24206[0-9]{7}$`)
+
+func (s *Service) ensureCustomer(ctx context.Context, phone string) error {
+	if !congoNumber.MatchString(phone) {
+		return nil
+	}
+	return s.books.EnsureCustomer(ctx, bank.MTN, phone, currency(MTNCongo))
+}
+
 func (s *Service) create(op operation) func(http.ResponseWriter, *http.Request, apiUser) {
 	return func(w http.ResponseWriter, r *http.Request, u apiUser) {
 		req, amount, ok := s.readRequest(w, r, u, op)
@@ -195,6 +206,8 @@ func (s *Service) start(ctx context.Context, u apiUser, op operation, req *reque
 			!errors.Is(err, bank.ErrExists) {
 			return err
 		}
+	} else if err := s.ensureCustomer(ctx, req.PartyID); err != nil {
+		return err
 	}
 	window := approvalWindow
 	switch {
@@ -333,7 +346,7 @@ func (s *Service) statusBody(ctx context.Context, u apiUser, op operation, req r
 			body.Status = "PENDING"
 		case bank.Successful:
 			body.Status = "SUCCESSFUL"
-			body.FinancialTransactionID = fmt.Sprint(crc32.ChecksumIEEE([]byte(t.ID)))
+			body.FinancialTransactionID = financialID(t.ID)
 		case bank.Expired:
 			code = "EXPIRED"
 		case bank.Failed:
@@ -394,10 +407,19 @@ func (s *Service) accountHolder(w http.ResponseWriter, r *http.Request, u apiUse
 		wrongEnvironment(w)
 		return
 	}
+	if err := s.ensureCustomer(r.Context(), r.PathValue("id")); err != nil {
+		s.internal(w, err)
+		return
+	}
 	active, err := s.store.hasCustomer(r.Context(), r.PathValue("id"), currency(u.Environment))
 	if err != nil {
 		s.internal(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"result": active})
+}
+
+// financialID is the number MTN gives a payment once money moved.
+func financialID(transactionID string) string {
+	return fmt.Sprint(crc32.ChecksumIEEE([]byte(transactionID)))
 }
