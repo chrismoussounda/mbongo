@@ -6,7 +6,9 @@ package report
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"errors"
 	"io"
 	"net/http"
@@ -116,6 +118,9 @@ CREATE TABLE report_callbacks (
 CREATE INDEX report_callbacks_by_run ON report_callbacks (run, operator, client);
 `
 
+// Tokens are looked up by the token a call issued or used.
+const byFingerprint = `CREATE INDEX report_calls_by_token ON report_calls (operator, token) WHERE token != '';`
+
 const timeLayout = "2006-01-02T15:04:05.000000000Z"
 
 // Recorder keeps the journal. A nil Recorder records nothing.
@@ -126,7 +131,7 @@ type Recorder struct {
 
 // New opens the journal; the first run starts with it.
 func New(ctx context.Context, db *sql.DB, c clock.Clock) (*Recorder, error) {
-	if err := migrate.Run(ctx, db, "report", []string{schema}); err != nil {
+	if err := migrate.Run(ctx, db, "report", []string{schema, byFingerprint}); err != nil {
 		return nil, err
 	}
 	rec := &Recorder{db: db, clock: c}
@@ -210,6 +215,28 @@ func (rec *Recorder) addCall(ctx context.Context, c Call) error {
 		c.Operator, c.Client, c.Operation, c.Method, c.Path, c.Reference, c.Order, c.RefundOf, c.Phone,
 		c.Amount, c.Currency, c.Token, c.Status, c.Outcome, c.Fault, c.At.UTC().Format(timeLayout), c.Millis)
 	return err
+}
+
+// Fingerprint stands for a token in the journal, which never keeps the token itself.
+func Fingerprint(token string) string {
+	if token == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(token))
+	return hex.EncodeToString(sum[:6])
+}
+
+// ClientOf is the client a token was issued to, by its fingerprint, whatever the run; it still
+// knows a token the operator has forgotten since it expired.
+func (rec *Recorder) ClientOf(ctx context.Context, operator, fingerprint string) string {
+	var client string
+	if fingerprint == "" {
+		return ""
+	}
+	_ = rec.db.QueryRowContext(ctx, `SELECT client FROM report_calls
+		WHERE operator = ? AND token = ? AND operation = 'token' AND client != '' LIMIT 1`,
+		operator, fingerprint).Scan(&client)
+	return client
 }
 
 // Run is one stretch of recorded traffic.

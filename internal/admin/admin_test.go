@@ -41,11 +41,11 @@ func setup(t *testing.T, token string) *env {
 		t.Fatal(err)
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	m, err := mtn.New(ctx, books, logger, func(context.Context, string, []byte) error { return nil })
+	m, err := mtn.New(ctx, books, logger, func(context.Context, string, []byte) (int, error) { return 200, nil })
 	if err != nil {
 		t.Fatal(err)
 	}
-	a, err := airtel.New(ctx, books, logger, func(context.Context, string, []byte) error { return nil })
+	a, err := airtel.New(ctx, books, logger, func(context.Context, string, []byte) (int, error) { return 200, nil })
 	if err != nil {
 		t.Fatal(err)
 	}

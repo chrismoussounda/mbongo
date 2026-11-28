@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/chrismoussounda/mbongo/internal/migrate"
+	"github.com/chrismoussounda/mbongo/internal/report"
 )
 
 // The faults a rule can ask for.
@@ -251,6 +252,7 @@ func (in *Injector) Wrap(operator, operation string, answers Answers, next http.
 			next.ServeHTTP(w, r)
 			return
 		}
+		report.NoteFault(r.Context(), rule.Fault)
 		switch rule.Fault {
 		case RateLimited:
 			answers.RateLimited(w)

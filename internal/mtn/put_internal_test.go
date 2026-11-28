@@ -17,8 +17,9 @@ func TestDefaultSenderPutsJSON(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	if err := put(&http.Client{Timeout: time.Second})(context.Background(), srv.URL, []byte(`{"status":"SUCCESSFUL"}`)); err != nil {
-		t.Fatal(err)
+	status, err := put(&http.Client{Timeout: time.Second})(context.Background(), srv.URL, []byte(`{"status":"SUCCESSFUL"}`))
+	if err != nil || status != http.StatusOK {
+		t.Fatal(status, err)
 	}
 	if want := `PUT application/json {"status":"SUCCESSFUL"}`; <-got != want {
 		t.Fatalf("want %s", want)

@@ -22,7 +22,7 @@ func TestACallbackIsSentOnlyOnce(t *testing.T) {
 	defer func() { _ = books.Close() }()
 	var sent atomic.Int32
 	s, err := New(ctx, books, slog.New(slog.NewTextHandler(io.Discard, nil)),
-		func(context.Context, string, []byte) error { sent.Add(1); return nil })
+		func(context.Context, string, []byte) (int, error) { sent.Add(1); return 200, nil })
 	if err != nil {
 		t.Fatal(err)
 	}

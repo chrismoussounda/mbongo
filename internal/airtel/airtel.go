@@ -14,6 +14,7 @@ import (
 
 	"github.com/chrismoussounda/mbongo/internal/bank"
 	"github.com/chrismoussounda/mbongo/internal/faults"
+	"github.com/chrismoussounda/mbongo/internal/report"
 )
 
 const (
@@ -33,16 +34,18 @@ const (
 var ErrDecided = errors.New("airtel: only a pending collection can be approved or refused")
 
 type Service struct {
-	store  *store
-	books  *bank.Bank
-	logger *slog.Logger
-	send   Sender
-	sends  sync.WaitGroup
-	keyMu  sync.Mutex
-	faults *faults.Injector
+	store   *store
+	books   *bank.Bank
+	logger  *slog.Logger
+	send    Sender
+	sends   sync.WaitGroup
+	keyMu   sync.Mutex
+	faults  *faults.Injector
+	journal *report.Recorder
 }
 
-type Sender func(ctx context.Context, url string, body []byte) error
+// Sender delivers a callback and returns the HTTP status the receiver answered.
+type Sender func(ctx context.Context, url string, body []byte) (int, error)
 
 // App is what Airtel's portal gives a partner. A CallbackKey turns on the callback hash.
 type App struct {
@@ -67,18 +70,18 @@ func New(ctx context.Context, books *bank.Bank, logger *slog.Logger, send Sender
 }
 
 func post(client *http.Client) Sender {
-	return func(ctx context.Context, u string, body []byte) error {
+	return func(ctx context.Context, u string, body []byte) (int, error) {
 		// The URL is the one set for the app through the admin API, as on Airtel's portal.
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost, u, bytes.NewReader(body)) //nolint:gosec // G704, see above
 		if err != nil {
-			return err
+			return 0, err
 		}
 		req.Header.Set("Content-Type", "application/json")
 		res, err := client.Do(req) //nolint:gosec // G704, see above
 		if err != nil {
-			return err
+			return 0, err
 		}
-		return res.Body.Close()
+		return res.StatusCode, res.Body.Close()
 	}
 }
 
@@ -92,7 +95,10 @@ func (s *Service) WithFaults(in *faults.Injector) *Service {
 // operation: token, keys, collection, refund, status, cashout, cashin, disbursement, balance
 // or user.
 func (s *Service) Routes(mux *http.ServeMux) {
-	mux.Handle("POST /auth/oauth2/token", s.faults.Wrap("airtel", "token", answers{}, http.HandlerFunc(s.issueToken)))
+	handle := func(pattern, operation string, h http.Handler) {
+		mux.Handle(pattern, s.journal.Wrap("airtel", operation, s.describe, s.faults.Wrap("airtel", operation, answers{}, h)))
+	}
+	handle("POST /auth/oauth2/token", "token", http.HandlerFunc(s.issueToken))
 	routes := []struct {
 		pattern, operation string
 		h                  func(http.ResponseWriter, *http.Request, App)
@@ -109,7 +115,7 @@ func (s *Service) Routes(mux *http.ServeMux) {
 		{"GET /standard/v1/users/{msisdn}", "user", s.user},
 	}
 	for _, rt := range routes {
-		mux.Handle(rt.pattern, s.faults.Wrap("airtel", rt.operation, answers{}, s.authorized(rt.h)))
+		handle(rt.pattern, rt.operation, s.authorized(rt.h))
 	}
 }
 

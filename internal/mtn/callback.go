@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/chrismoussounda/mbongo/internal/faults"
+	"github.com/chrismoussounda/mbongo/internal/report"
 )
 
 // notify sends at most one callback, in the background, unless a callback rule says
@@ -24,18 +25,19 @@ func (s *Service) notify(req request) {
 	switch rule.Fault {
 	case faults.CallbackNever:
 	case faults.CallbackBeforeAnswer:
-		s.deliver(req, 1)
+		s.deliver(req, 1, rule.Fault)
 	case faults.CallbackLate:
-		s.books.Clock().AfterFunc(rule.Delay, func() { s.sends.Go(func() { s.deliver(req, 1) }) })
+		s.books.Clock().AfterFunc(rule.Delay, func() { s.sends.Go(func() { s.deliver(req, 1, rule.Fault) }) })
 	case faults.CallbackTwice:
-		s.sends.Go(func() { s.deliver(req, 2) })
+		s.sends.Go(func() { s.deliver(req, 2, rule.Fault) })
 	default:
-		s.sends.Go(func() { s.deliver(req, 1) })
+		s.sends.Go(func() { s.deliver(req, 1, "") })
 	}
 }
 
-// deliver sends the callback times times, if no other call has sent it.
-func (s *Service) deliver(req request, times int) {
+// deliver sends the callback times times, if no other call has sent it, and records each
+// sending with the fault that shaped it.
+func (s *Service) deliver(req request, times int, fault string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	first, err := s.store.markNotified(ctx, req.APIUser, req.ReferenceID)
@@ -64,8 +66,17 @@ func (s *Service) deliver(req request, times int) {
 	}
 	raw, _ := json.Marshal(body)
 	for range times {
-		if err := s.send(ctx, req.CallbackURL, raw); err != nil {
+		start := s.books.Clock().Now()
+		status, err := s.send(ctx, req.CallbackURL, raw)
+		cb := report.Callback{Operator: "mtn", Client: req.APIUser, Reference: req.ReferenceID,
+			Outcome: seenAs(body.Status), HTTPStatus: status, Fault: fault, At: start,
+			Millis: s.books.Clock().Now().Sub(start).Milliseconds()}
+		if err != nil {
+			cb.Error = err.Error()
 			s.logger.Info("callback not delivered, not retried", "ref", req.ReferenceID, "err", err)
+		}
+		if err := s.journal.Callback(ctx, cb); err != nil {
+			s.logger.Error("report", "err", err)
 		}
 	}
 }

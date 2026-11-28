@@ -25,6 +25,7 @@ import (
 	"github.com/chrismoussounda/mbongo/internal/bank"
 	"github.com/chrismoussounda/mbongo/internal/clock"
 	"github.com/chrismoussounda/mbongo/internal/faults"
+	"github.com/chrismoussounda/mbongo/internal/report"
 )
 
 var start = time.Date(2026, 11, 27, 9, 0, 0, 0, time.UTC)
@@ -45,6 +46,18 @@ type env struct {
 	server    *httptest.Server
 	mu        sync.Mutex
 	callbacks []callback
+	receiver  int
+	journal   *report.Recorder
+}
+
+// receiverStatus is what the client's callback endpoint answers: receiver, or 200.
+func (e *env) receiverStatus() int {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.receiver == 0 {
+		return http.StatusOK
+	}
+	return e.receiver
 }
 
 func setup(t *testing.T) *env {
@@ -56,13 +69,13 @@ func setup(t *testing.T) *env {
 		t.Fatal(err)
 	}
 	e.svc, err = airtel.New(e.ctx, e.books, slog.New(slog.NewTextHandler(io.Discard, nil)),
-		func(_ context.Context, url string, body []byte) error {
+		func(_ context.Context, url string, body []byte) (int, error) {
 			var m map[string]any
 			_ = json.Unmarshal(body, &m)
 			e.mu.Lock()
 			e.callbacks = append(e.callbacks, callback{url, body, m})
 			e.mu.Unlock()
-			return nil
+			return e.receiverStatus(), nil
 		})
 	if err != nil {
 		t.Fatal(err)
@@ -70,7 +83,10 @@ func setup(t *testing.T) *env {
 	if e.rules, err = faults.New(e.ctx, e.books.DB()); err != nil {
 		t.Fatal(err)
 	}
-	e.svc.WithFaults(e.rules)
+	if e.journal, err = report.New(e.ctx, e.books.DB(), e.clock); err != nil {
+		t.Fatal(err)
+	}
+	e.svc.WithFaults(e.rules).WithReport(e.journal)
 	mux := http.NewServeMux()
 	e.svc.Routes(mux)
 	e.server = httptest.NewServer(mux)
