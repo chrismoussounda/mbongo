@@ -18,8 +18,8 @@ early. At the end, it tells you what your app got wrong.
 
 Early work. MTN's collection and payout APIs work, in their sandbox flavour and their Congo flavour, and
 so do Airtel Money Congo's collections, refunds, cash-in, cash-out and payouts, all on top of books where
-every movement adds up to zero. Tests can make either operator fail on purpose, and each customer has
-a phone page to approve or refuse what your app asks.
+every movement adds up to zero. Tests can make either operator fail on purpose, each customer has
+a phone page to approve or refuse what your app asks, and a report says what your app got wrong.
 
 | Step | What | State |
 | --- | --- | --- |
@@ -30,7 +30,7 @@ a phone page to approve or refuse what your app asks.
 | 5 | Airtel Money | done |
 | 6 | Failures on demand | done |
 | 7 | A phone page to approve or ignore payments | done |
-| 8 | A report on your integration | |
+| 8 | A report on your integration | done |
 | 9 | Checks against a public SDK, demo, write-up | |
 
 ## Run it
@@ -130,6 +130,22 @@ curl -X POST localhost:8080/_mbongo/rules -H "Authorization: Bearer $MBONGO_ADMI
 ```
 
 See [docs/faults.md](docs/faults.md).
+
+## Read the report
+
+Mbongo keeps every call your app makes and every callback it sends, and checks them for the mistakes
+that lose or double money: an order paid twice, a lost answer retried under a new reference, a callback
+believed without a status call, money taken that your app never confirmed, refunds of more than was
+paid, a token per call, polling too fast. Open `/_mbongo/report/` for a page per MTN API user and
+Airtel app, or read the same as JSON in CI:
+
+```sh
+curl -X POST localhost:8080/_mbongo/report/runs -H "Authorization: Bearer $MBONGO_ADMIN_TOKEN"   # start a run
+# ... run your tests ...
+curl -s localhost:8080/_mbongo/report -H "Authorization: Bearer $MBONGO_ADMIN_TOKEN" | jq -e '.errors == 0'
+```
+
+See [docs/report.md](docs/report.md).
 
 ## How close to the real thing
 
