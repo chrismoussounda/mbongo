@@ -20,6 +20,7 @@ import (
 	"github.com/chrismoussounda/mbongo/internal/clock"
 	"github.com/chrismoussounda/mbongo/internal/faults"
 	"github.com/chrismoussounda/mbongo/internal/mtn"
+	"github.com/chrismoussounda/mbongo/internal/report"
 )
 
 var start = time.Date(2026, 11, 27, 9, 0, 0, 0, time.UTC)
@@ -39,8 +40,20 @@ type env struct {
 	server    *httptest.Server
 	mu        sync.Mutex
 	callbacks []callback
-	// slowReceiver makes the shop's callback endpoint take its time.
+	// slowReceiver makes the client's callback endpoint take its time.
 	slowReceiver time.Duration
+	receiver     int
+	journal      *report.Recorder
+}
+
+// receiverStatus is what the client's callback endpoint answers: receiver, or 200.
+func (e *env) receiverStatus() int {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.receiver == 0 {
+		return http.StatusOK
+	}
+	return e.receiver
 }
 
 func setup(t *testing.T) *env {
@@ -52,14 +65,14 @@ func setup(t *testing.T) *env {
 		t.Fatal(err)
 	}
 	e.svc, err = mtn.New(e.ctx, e.books, slog.New(slog.NewTextHandler(io.Discard, nil)),
-		func(_ context.Context, url string, body []byte) error {
+		func(_ context.Context, url string, body []byte) (int, error) {
 			var m map[string]any
 			_ = json.Unmarshal(body, &m)
 			time.Sleep(e.slowReceiver)
 			e.mu.Lock()
 			e.callbacks = append(e.callbacks, callback{url, m})
 			e.mu.Unlock()
-			return nil
+			return e.receiverStatus(), nil
 		})
 	if err != nil {
 		t.Fatal(err)
@@ -67,7 +80,10 @@ func setup(t *testing.T) *env {
 	if e.rules, err = faults.New(e.ctx, e.books.DB()); err != nil {
 		t.Fatal(err)
 	}
-	e.svc.WithFaults(e.rules)
+	if e.journal, err = report.New(e.ctx, e.books.DB(), e.clock, slog.New(slog.NewTextHandler(io.Discard, nil))); err != nil {
+		t.Fatal(err)
+	}
+	e.svc.WithFaults(e.rules).WithReport(e.journal)
 	mux := http.NewServeMux()
 	e.svc.Routes(mux)
 	e.server = httptest.NewServer(mux)
@@ -119,7 +135,7 @@ func (e *env) merchant(environment string) *merchant {
 
 func (e *env) user(product, environment string) *merchant {
 	e.t.Helper()
-	return e.partnerUser("shop", product, environment)
+	return e.partnerUser("acme", product, environment)
 }
 
 func (e *env) partnerUser(partner, product, environment string) *merchant {
@@ -128,7 +144,7 @@ func (e *env) partnerUser(partner, product, environment string) *merchant {
 	if err != nil {
 		e.t.Fatal(err)
 	}
-	user, key, err := e.svc.CreateAPIUser(e.ctx, sub, "shop.example", environment)
+	user, key, err := e.svc.CreateAPIUser(e.ctx, sub, "acme.example", environment)
 	if err != nil {
 		e.t.Fatal(err)
 	}
@@ -204,14 +220,14 @@ func TestSandboxProvisioning(t *testing.T) {
 	sub, _ := e.svc.CreateSubscription(e.ctx, "collection", "")
 	h := map[string]string{"Ocp-Apim-Subscription-Key": sub, "X-Reference-Id": ref1}
 
-	if a := e.call(http.MethodPost, "/v1_0/apiuser", h, map[string]string{"providerCallbackHost": "shop.example"}); a.status != 201 {
+	if a := e.call(http.MethodPost, "/v1_0/apiuser", h, map[string]string{"providerCallbackHost": "acme.example"}); a.status != 201 {
 		t.Fatalf("create: %d %v", a.status, a.body)
 	}
-	if a := e.call(http.MethodPost, "/v1_0/apiuser", h, map[string]string{"providerCallbackHost": "shop.example"}); a.status != 409 || a.body["code"] != "RESOURCE_ALREADY_EXIST" {
+	if a := e.call(http.MethodPost, "/v1_0/apiuser", h, map[string]string{"providerCallbackHost": "acme.example"}); a.status != 409 || a.body["code"] != "RESOURCE_ALREADY_EXIST" {
 		t.Fatalf("again: %d %v", a.status, a.body)
 	}
 	a := e.call(http.MethodGet, "/v1_0/apiuser/"+ref1, h, nil)
-	if a.status != 200 || a.body["providerCallbackHost"] != "shop.example" || a.body["targetEnvironment"] != "sandbox" {
+	if a.status != 200 || a.body["providerCallbackHost"] != "acme.example" || a.body["targetEnvironment"] != "sandbox" {
 		t.Fatalf("get: %d %v", a.status, a.body)
 	}
 	a = e.call(http.MethodPost, "/v1_0/apiuser/"+ref1+"/apikey", h, nil)
@@ -304,7 +320,7 @@ func TestCallsNeedAValidToken(t *testing.T) {
 func TestSandboxPaymentSucceeds(t *testing.T) {
 	e := setup(t)
 	m := e.merchant("sandbox")
-	a := m.requestToPay(ref1, pay("46733123453", "25.50", "EUR"), map[string]string{"X-Callback-Url": "https://shop.example/momo"})
+	a := m.requestToPay(ref1, pay("46733123453", "25.50", "EUR"), map[string]string{"X-Callback-Url": "https://acme.example/momo"})
 	if a.status != 202 || a.body != nil {
 		t.Fatalf("request: %d %v", a.status, a.body)
 	}
@@ -322,7 +338,7 @@ func TestSandboxPaymentSucceeds(t *testing.T) {
 		t.Fatalf("balance in the sandbox: %d %v", b.status, b.body)
 	}
 	got := e.waitCallbacks(1)
-	if len(got) != 1 || got[0].url != "https://shop.example/momo" || got[0].body["status"] != "SUCCESSFUL" {
+	if len(got) != 1 || got[0].url != "https://acme.example/momo" || got[0].body["status"] != "SUCCESSFUL" {
 		t.Fatalf("callbacks: %+v", got)
 	}
 	if err := e.books.Check(e.ctx); err != nil {
@@ -426,7 +442,7 @@ func TestCongoPaymentWaitsForThePayer(t *testing.T) {
 		t.Fatal("account holder check is wrong")
 	}
 
-	_ = m.requestToPay(ref1, pay("242061234567", "2500", "XAF"), map[string]string{"X-Callback-Url": "https://shop.example/cb"})
+	_ = m.requestToPay(ref1, pay("242061234567", "2500", "XAF"), map[string]string{"X-Callback-Url": "https://acme.example/cb"})
 	if s := m.status(ref1); s.body["status"] != "PENDING" || s.body["financialTransactionId"] != nil || s.body["reason"] != nil {
 		t.Fatalf("before approval: %v", s.body)
 	}

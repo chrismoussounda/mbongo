@@ -15,7 +15,7 @@ import (
 func TestApprovingTwiceAtOnceMovesMoneyOnce(t *testing.T) {
 	f := setup(t)
 	c := f.customer("242061234567", 10_000)
-	f.merchant("shop", 0)
+	f.merchant("acme", 0)
 	tx, _ := f.request(bank.Collection, "ref-1", 2_500)
 
 	var wg sync.WaitGroup
@@ -47,7 +47,7 @@ func TestBooksBalanceAfterRandomWork(t *testing.T) {
 	for i, p := range phones {
 		f.customer(p, int64(i)*5_000)
 	}
-	for _, m := range []string{"shop", "taxi"} {
+	for _, m := range []string{"acme", "taxi"} {
 		f.merchant(m, 3_000)
 	}
 	var pending []string
@@ -59,7 +59,7 @@ func TestBooksBalanceAfterRandomWork(t *testing.T) {
 				kind = bank.Payout
 			}
 			tx, err := f.bank.Request(f.ctx, bank.Request{
-				Kind: kind, Operator: bank.MTN, Merchant: []string{"shop", "taxi"}[rng.IntN(2)],
+				Kind: kind, Operator: bank.MTN, Merchant: []string{"acme", "taxi"}[rng.IntN(2)],
 				Phone: phones[rng.IntN(len(phones))], Amount: 1 + rng.Int64N(4_000), Currency: "XAF",
 				PartnerRef: fmt.Sprint("ref-", i), Window: time.Duration(1+rng.IntN(5)) * time.Minute,
 			})
@@ -97,7 +97,7 @@ func TestCheckFindsBrokenBooks(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			f := setup(t)
 			f.customer("242061234567", 10_000)
-			f.merchant("shop", 0)
+			f.merchant("acme", 0)
 			tx, _ := f.request(bank.Collection, "ref-1", 2_500)
 			_, _ = f.bank.Approve(f.ctx, tx.ID)
 			_ = f.bank.Close()

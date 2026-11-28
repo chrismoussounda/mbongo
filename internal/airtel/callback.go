@@ -13,6 +13,7 @@ import (
 
 	"github.com/chrismoussounda/mbongo/internal/bank"
 	"github.com/chrismoussounda/mbongo/internal/faults"
+	"github.com/chrismoussounda/mbongo/internal/report"
 )
 
 type callbackTransaction struct {
@@ -47,17 +48,17 @@ func (s *Service) notify(p payment) {
 	switch {
 	case rule.Fault == faults.CallbackNever:
 	case wait > 0:
-		s.books.Clock().AfterFunc(wait, func() { s.sends.Go(func() { s.deliver(p, times) }) })
+		s.books.Clock().AfterFunc(wait, func() { s.sends.Go(func() { s.deliver(p, times, rule.Fault) }) })
 	case rule.Fault == faults.CallbackBeforeAnswer:
-		s.deliver(p, times)
+		s.deliver(p, times, rule.Fault)
 	default:
-		s.sends.Go(func() { s.deliver(p, times) })
+		s.sends.Go(func() { s.deliver(p, times, rule.Fault) })
 	}
 }
 
 // deliver posts the callback times times, if the payment has an outcome and no other call
-// has sent it.
-func (s *Service) deliver(p payment, times int) {
+// has sent it, and records each sending with the fault that shaped it.
+func (s *Service) deliver(p payment, times int, fault string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	app, err := s.store.app(ctx, p.ClientID)
@@ -80,8 +81,16 @@ func (s *Service) deliver(p payment, times int) {
 	}
 	raw, _ := json.Marshal(body)
 	for range times {
-		if err := s.send(ctx, app.CallbackURL, raw); err != nil {
+		start := s.books.Clock().Now()
+		status, err := s.send(ctx, app.CallbackURL, raw)
+		cb := report.Callback{Operator: "airtel", Client: p.ClientID, Operation: p.Kind, Reference: p.ID, Outcome: seenAs(st.status),
+			HTTPStatus: status, Fault: fault, At: start, Millis: s.books.Clock().Now().Sub(start).Milliseconds()}
+		if err != nil {
+			cb.Error = err.Error()
 			s.logger.Info("callback not delivered, not retried", "id", p.ID, "err", err)
+		}
+		if err := s.journal.Callback(ctx, cb); err != nil {
+			s.logger.Error("report", "err", err)
 		}
 	}
 }

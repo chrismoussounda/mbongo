@@ -20,7 +20,7 @@ func TestWalletsAndCustomers(t *testing.T) {
 	if _, err := f.bank.OpenCustomer(f.ctx, bank.Airtel, "055123456", "XAF", 0); err != nil {
 		t.Fatal(err)
 	}
-	f.merchant("shop", 0)
+	f.merchant("acme", 0)
 
 	w, err := f.bank.Wallets(f.ctx, bank.MTN, "242061234567")
 	if err != nil {
@@ -49,7 +49,7 @@ func TestWalletsAndCustomers(t *testing.T) {
 func TestHistoryNewestFirst(t *testing.T) {
 	f := setup(t)
 	f.customer("242061234567", 10_000)
-	f.merchant("shop", 10_000)
+	f.merchant("acme", 10_000)
 	first, err := f.request(bank.Collection, "ref-1", 100)
 	if err != nil {
 		t.Fatal(err)
@@ -92,8 +92,8 @@ func TestWatchHearsChanges(t *testing.T) {
 	default:
 		t.Fatal("no change after opening a wallet")
 	}
-	f.merchant("shop", 0)
-	f.merchant("shop2", 0)
+	f.merchant("acme", 0)
+	f.merchant("acme2", 0)
 	<-changes
 	select {
 	case <-changes:
@@ -110,7 +110,7 @@ func TestWatchHearsChanges(t *testing.T) {
 	default:
 	}
 	stop()
-	f.merchant("shop3", 0)
+	f.merchant("acme3", 0)
 	select {
 	case <-changes:
 		t.Fatal("change after stop")
@@ -121,7 +121,7 @@ func TestWatchHearsChanges(t *testing.T) {
 func TestOnSettledHearsEachOutcomeOnce(t *testing.T) {
 	f := setup(t)
 	f.customer("242061234567", 10_000)
-	f.merchant("shop", 0)
+	f.merchant("acme", 0)
 	var got []string
 	f.bank.OnSettled(func(_ context.Context, tx bank.Transaction) {
 		got = append(got, tx.PartnerRef+":"+string(tx.Status))
@@ -154,7 +154,7 @@ func TestOnSettledHearsEachOutcomeOnce(t *testing.T) {
 func TestExpireDueAnnouncesEachExpiry(t *testing.T) {
 	f := setup(t)
 	f.customer("242061234567", 10_000)
-	f.merchant("shop", 0)
+	f.merchant("acme", 0)
 	var got []string
 	f.bank.OnSettled(func(_ context.Context, tx bank.Transaction) { got = append(got, tx.PartnerRef) })
 	_, _ = f.request(bank.Collection, "a", 100)

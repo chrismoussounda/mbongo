@@ -23,6 +23,7 @@ import (
 	"github.com/chrismoussounda/mbongo/internal/money"
 	"github.com/chrismoussounda/mbongo/internal/mtn"
 	"github.com/chrismoussounda/mbongo/internal/phone"
+	"github.com/chrismoussounda/mbongo/internal/report"
 	"github.com/chrismoussounda/mbongo/internal/server"
 )
 
@@ -57,11 +58,15 @@ func run(ctx context.Context, getenv func(string) string, out io.Writer) error {
 	if err != nil {
 		return err
 	}
+	journal, err := report.New(ctx, books.DB(), books.Clock(), logger)
+	if err != nil {
+		return err
+	}
 	momo, err := mtn.New(ctx, books, logger, nil)
 	if err != nil {
 		return err
 	}
-	momo.WithFaults(rules)
+	momo.WithFaults(rules).WithReport(journal)
 	defer momo.Wait()
 
 	airtelMoney, err := airtel.New(ctx, books, logger, nil)
@@ -69,7 +74,7 @@ func run(ctx context.Context, getenv func(string) string, out io.Writer) error {
 		return err
 	}
 	defer airtelMoney.Wait()
-	airtelMoney.WithFaults(rules)
+	airtelMoney.WithFaults(rules).WithReport(journal)
 
 	phones, err := phone.New(ctx, books, map[bank.Operator]phone.Operator{bank.MTN: momo, bank.Airtel: airtelMoney}, logger)
 	if err != nil {
@@ -82,16 +87,18 @@ func run(ctx context.Context, getenv func(string) string, out io.Writer) error {
 		defer close(swept)
 		janitor.Run(sweepCtx, time.Second, func(err error) { logger.Error("housekeeping", "err", err) },
 			func(ctx context.Context) error { _, err := books.ExpireDue(ctx); return err },
-			momo.PurgeTokens, airtelMoney.PurgeTokens)
+			momo.PurgeTokens, airtelMoney.PurgeTokens, journal.Prune)
 	}()
 	defer func() { stopSweep(); <-swept }()
 
 	srv := &http.Server{
 		Addr: address(getenv),
 		Handler: server.New(logger, version, books, momo.Routes, airtelMoney.Routes, func(mux *http.ServeMux) {
-			admin.Routes(mux, getenv("MBONGO_ADMIN_TOKEN"), books, momo, airtelMoney, rules, phones, logger)
+			admin.Routes(mux, getenv("MBONGO_ADMIN_TOKEN"), books, momo, airtelMoney, rules, phones, journal, logger)
 		}, func(mux *http.ServeMux) {
 			phones.Routes(ctx, mux)
+		}, func(mux *http.ServeMux) {
+			journal.Routes(mux, map[string]report.Ledger{"mtn": momo, "airtel": airtelMoney}, logger)
 		}),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,

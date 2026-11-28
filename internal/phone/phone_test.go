@@ -40,7 +40,7 @@ type operator struct {
 }
 
 func (o *operator) Prompts(ctx context.Context, phone string) ([]bank.Prompt, error) {
-	return o.books.PromptsFrom(ctx, `SELECT t.id, 'Boutique <b>Mama</b>', t.external_id
+	return o.books.PromptsFrom(ctx, `SELECT t.id, 'Acme <b>Pay</b>', t.external_id
 		FROM transactions t JOIN accounts c ON c.id = t.customer_id
 		WHERE t.operator = ? AND c.name = ? AND t.kind = 'collection' AND t.external_id != 'cashout'
 			AND t.status = 'pending' AND t.expires_at > ?
@@ -48,7 +48,7 @@ func (o *operator) Prompts(ctx context.Context, phone string) ([]bank.Prompt, er
 }
 
 func (o *operator) Waiting(ctx context.Context) ([]bank.Prompt, error) {
-	return o.books.PromptsFrom(ctx, `SELECT t.id, 'Boutique <b>Mama</b>', t.external_id
+	return o.books.PromptsFrom(ctx, `SELECT t.id, 'Acme <b>Pay</b>', t.external_id
 		FROM transactions t
 		WHERE t.operator = ? AND t.kind = 'collection' AND t.external_id != 'cashout'
 			AND t.status = 'pending' AND t.expires_at > ?
@@ -69,7 +69,7 @@ func (o *operator) Answer(ctx context.Context, id string, approve bool) error {
 }
 
 func (o *operator) Describe(_ context.Context, t bank.Transaction) (string, string, error) {
-	return "Boutique Mama", "REF-" + t.PartnerRef, nil
+	return "Acme", "REF-" + t.PartnerRef, nil
 }
 
 type env struct {
@@ -112,13 +112,13 @@ func setup(t *testing.T) *env {
 	if _, err := e.books.OpenCustomer(e.ctx, bank.MTN, number, "XAF", 10_000); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.books.OpenMerchant(e.ctx, bank.MTN, "shop", "XAF", 50_000); err != nil {
+	if _, err := e.books.OpenMerchant(e.ctx, bank.MTN, "acme", "XAF", 50_000); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := e.books.OpenCustomer(e.ctx, bank.Airtel, airtelN, "XAF", 5_000); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.books.OpenMerchant(e.ctx, bank.Airtel, "shop", "XAF", 50_000); err != nil {
+	if _, err := e.books.OpenMerchant(e.ctx, bank.Airtel, "acme", "XAF", 50_000); err != nil {
 		t.Fatal(err)
 	}
 	return e
@@ -174,7 +174,7 @@ func (e *env) open() {
 func (e *env) request(op bank.Operator, phone string, kind bank.Kind, amount int64) bank.Transaction {
 	e.t.Helper()
 	e.seq++
-	t, err := e.books.Request(e.ctx, bank.Request{Kind: kind, Operator: op, Merchant: "shop",
+	t, err := e.books.Request(e.ctx, bank.Request{Kind: kind, Operator: op, Merchant: "acme",
 		Phone: phone, Amount: amount, Currency: "XAF", PartnerRef: "ref-" + string(rune('a'+e.seq)),
 		ExternalID: "Order <7>"})
 	if err != nil {
@@ -272,7 +272,7 @@ func TestPromptPopsUpOverAnyScreen(t *testing.T) {
 		r := e.get(page + app)
 		for _, want := range []string{
 			`data-tx="` + first.ID + `"`, "SIM 1 · MTN MoMo",
-			"Boutique &lt;b&gt;Mama&lt;/b&gt;", "2\u00a0500\u00a0XAF", "Order &lt;7&gt;",
+			"Acme &lt;b&gt;Pay&lt;/b&gt;", "2\u00a0500\u00a0XAF", "Order &lt;7&gt;",
 			"Expires at 10:05:00", `data-left="270"`,
 			`action="` + page + `/prompts/` + first.ID + `"`, "1 more waiting",
 		} {
@@ -280,7 +280,7 @@ func TestPromptPopsUpOverAnyScreen(t *testing.T) {
 				t.Errorf("%q lacks %q", app, want)
 			}
 		}
-		if strings.Contains(r.body, "<b>Mama") {
+		if strings.Contains(r.body, "<b>Pay") {
 			t.Error("payee not escaped")
 		}
 	}
@@ -298,7 +298,7 @@ func TestPromptPopsUpOverAnyScreen(t *testing.T) {
 func TestStuckPaymentHasNoCountdown(t *testing.T) {
 	e := setup(t)
 	e.open()
-	if _, err := e.books.Request(e.ctx, bank.Request{Kind: bank.Collection, Operator: bank.MTN, Merchant: "shop",
+	if _, err := e.books.Request(e.ctx, bank.Request{Kind: bank.Collection, Operator: bank.MTN, Merchant: "acme",
 		Phone: number, Amount: 1, Currency: "XAF", PartnerRef: "stuck", Window: 100 * 365 * 24 * time.Hour}); err != nil {
 		t.Fatal(err)
 	}
@@ -412,17 +412,17 @@ func TestSMSForEveryMoneyMove(t *testing.T) {
 		want string
 	}{
 		{func() { tx := e.collect(2_500); _ = e.answer(tx, url.Values{"action": {"approve"}}) },
-			"Vous avez payé 2 500 FCFA à Boutique Mama. Frais: 0 FCFA. Nouveau solde: 7 500 FCFA. Ref: REF-ref-b."},
+			"Vous avez payé 2 500 FCFA à Acme. Frais: 0 FCFA. Nouveau solde: 7 500 FCFA. Ref: REF-ref-b."},
 		{func() { tx := e.collect(100); _ = e.answer(tx, url.Values{"action": {"refuse"}}) },
-			"Vous avez refusé le paiement de 100 FCFA demandé par Boutique Mama."},
+			"Vous avez refusé le paiement de 100 FCFA demandé par Acme."},
 		{func() { tx := e.collect(99_999); _ = e.answer(tx, url.Values{"action": {"approve"}}) },
-			"Echec du paiement de 99 999 FCFA à Boutique Mama: solde insuffisant. Solde: 7 500 FCFA."},
+			"Echec du paiement de 99 999 FCFA à Acme: solde insuffisant. Solde: 7 500 FCFA."},
 		{func() { e.collect(300); e.clock.Advance(5 * time.Minute); _, _ = e.books.ExpireDue(e.ctx) },
-			"La demande de paiement de 300 FCFA de Boutique Mama a expiré sans réponse."},
+			"La demande de paiement de 300 FCFA de Acme a expiré sans réponse."},
 		{func() {
 			tx := e.request(bank.MTN, number, bank.Payout, 1_000)
 			_, _ = e.books.Approve(e.ctx, tx.ID)
-		}, "Vous avez reçu 1 000 FCFA de Boutique Mama. Nouveau solde: 8 500 FCFA. Ref: REF-ref-f."},
+		}, "Vous avez reçu 1 000 FCFA de Acme. Nouveau solde: 8 500 FCFA. Ref: REF-ref-f."},
 	}
 	for i, c := range cases {
 		c.do()
@@ -594,7 +594,7 @@ func TestListFeedAnnouncesNewPayments(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := map[string]string{"url": "/_mbongo/phone/airtel/" + airtelN, "number": airtelN, "operator": "Airtel Money",
-		"payee": "Boutique <b>Mama</b>", "amount": "1 500 XAF"}
+		"payee": "Acme <b>Pay</b>", "amount": "1 500 XAF"}
 	for k, v := range want {
 		if got[k] != v {
 			t.Errorf("%s = %q, want %q", k, got[k], v)
@@ -620,7 +620,7 @@ func TestListFeedAnnouncesNewPayments(t *testing.T) {
 func TestOnlyPromptsCanBeAnswered(t *testing.T) {
 	e := setup(t)
 	e.open()
-	cashOut, err := e.books.Request(e.ctx, bank.Request{Kind: bank.Collection, Operator: bank.MTN, Merchant: "shop",
+	cashOut, err := e.books.Request(e.ctx, bank.Request{Kind: bank.Collection, Operator: bank.MTN, Merchant: "acme",
 		Phone: number, Amount: 1, Currency: "XAF", PartnerRef: "cash", ExternalID: "cashout"})
 	if err != nil {
 		t.Fatal(err)

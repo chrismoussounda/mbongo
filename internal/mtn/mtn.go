@@ -14,6 +14,7 @@ import (
 
 	"github.com/chrismoussounda/mbongo/internal/bank"
 	"github.com/chrismoussounda/mbongo/internal/faults"
+	"github.com/chrismoussounda/mbongo/internal/report"
 )
 
 const (
@@ -39,15 +40,17 @@ const (
 )
 
 type Service struct {
-	store  *store
-	books  *bank.Bank
-	logger *slog.Logger
-	send   Sender
-	sends  sync.WaitGroup
-	faults *faults.Injector
+	store   *store
+	books   *bank.Bank
+	logger  *slog.Logger
+	send    Sender
+	sends   sync.WaitGroup
+	faults  *faults.Injector
+	journal *report.Recorder
 }
 
-type Sender func(ctx context.Context, url string, body []byte) error
+// Sender delivers a callback and returns the HTTP status the receiver answered.
+type Sender func(ctx context.Context, url string, body []byte) (int, error)
 
 // New sends callbacks with send, or by HTTP PUT when send is nil.
 func New(ctx context.Context, books *bank.Bank, logger *slog.Logger, send Sender) (*Service, error) {
@@ -67,20 +70,20 @@ func (s *Service) PurgeTokens(ctx context.Context) error {
 }
 
 func put(client *http.Client) Sender {
-	return func(ctx context.Context, u string, body []byte) error {
+	return func(ctx context.Context, u string, body []byte) (int, error) {
 		// Calling a URL chosen by the client is the point of a callback; readRequest already
 		// limits it to the host the API user registered, as MTN does.
 		req, err := http.NewRequestWithContext(ctx, http.MethodPut, u, bytes.NewReader(body)) //nolint:gosec // G704, see above
 
 		if err != nil {
-			return err
+			return 0, err
 		}
 		req.Header.Set("Content-Type", "application/json")
 		res, err := client.Do(req) //nolint:gosec // G704, see above
 		if err != nil {
-			return err
+			return 0, err
 		}
-		return res.Body.Close()
+		return res.StatusCode, res.Body.Close()
 	}
 }
 
@@ -94,7 +97,7 @@ func (s *Service) WithFaults(in *faults.Injector) *Service {
 // apiuser, token, balance, accountholder, a payment operation, or status.
 func (s *Service) Routes(mux *http.ServeMux) {
 	handle := func(pattern, operation string, h http.HandlerFunc) {
-		mux.Handle(pattern, s.faults.Wrap("mtn", operation, answers{}, h))
+		mux.Handle(pattern, s.journal.Wrap("mtn", operation, s.describe, s.faults.Wrap("mtn", operation, answers{}, h)))
 	}
 	handle("POST /v1_0/apiuser", "apiuser", s.createAPIUser)
 	handle("GET /v1_0/apiuser/{id}", "apiuser", s.getAPIUser)

@@ -22,6 +22,7 @@ import (
 	"github.com/chrismoussounda/mbongo/internal/faults"
 	"github.com/chrismoussounda/mbongo/internal/mtn"
 	"github.com/chrismoussounda/mbongo/internal/phone"
+	"github.com/chrismoussounda/mbongo/internal/report"
 )
 
 const adminToken = "letmein"
@@ -41,11 +42,11 @@ func setup(t *testing.T, token string) *env {
 		t.Fatal(err)
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	m, err := mtn.New(ctx, books, logger, func(context.Context, string, []byte) error { return nil })
+	m, err := mtn.New(ctx, books, logger, func(context.Context, string, []byte) (int, error) { return 200, nil })
 	if err != nil {
 		t.Fatal(err)
 	}
-	a, err := airtel.New(ctx, books, logger, func(context.Context, string, []byte) error { return nil })
+	a, err := airtel.New(ctx, books, logger, func(context.Context, string, []byte) (int, error) { return 200, nil })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,8 +54,12 @@ func setup(t *testing.T, token string) *env {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m.WithFaults(rules)
-	a.WithFaults(rules)
+	journal, err := report.New(ctx, books.DB(), books.Clock(), logger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.WithFaults(rules).WithReport(journal)
+	a.WithFaults(rules).WithReport(journal)
 	mux := http.NewServeMux()
 	m.Routes(mux)
 	a.Routes(mux)
@@ -62,7 +67,7 @@ func setup(t *testing.T, token string) *env {
 	if err != nil {
 		t.Fatal(err)
 	}
-	admin.Routes(mux, token, books, m, a, rules, phones, logger)
+	admin.Routes(mux, token, books, m, a, rules, phones, journal, logger)
 	e := &env{t: t, server: httptest.NewServer(mux), books: books, phones: phones}
 	t.Cleanup(func() { e.server.Close(); m.Wait(); a.Wait(); _ = books.Close() })
 	return e
@@ -117,7 +122,7 @@ func TestACongoPaymentFromStartToFinish(t *testing.T) {
 	}
 	key := sub["subscriptionKey"].(string)
 	status, user := e.admin("/_mbongo/mtn/api-users", map[string]string{"subscriptionKey": key,
-		"providerCallbackHost": "shop.example", "targetEnvironment": "mtncongo"})
+		"providerCallbackHost": "acme.example", "targetEnvironment": "mtncongo"})
 	if status != http.StatusCreated {
 		t.Fatalf("api user: %d %v", status, user)
 	}
@@ -214,7 +219,7 @@ func TestFundAPayoutAccount(t *testing.T) {
 	e := setup(t, adminToken)
 	_, sub := e.admin("/_mbongo/mtn/subscriptions", map[string]string{"product": "disbursement"})
 	_, user := e.admin("/_mbongo/mtn/api-users", map[string]string{"subscriptionKey": sub["subscriptionKey"].(string),
-		"providerCallbackHost": "shop.example", "targetEnvironment": "mtncongo"})
+		"providerCallbackHost": "acme.example", "targetEnvironment": "mtncongo"})
 	path := "/_mbongo/mtn/" + user["apiUser"].(string) + "/fund"
 
 	status, body := e.admin(path, map[string]string{"amount": "250000"})
@@ -239,7 +244,7 @@ func TestAirtelAppPaysThroughTheAdmin(t *testing.T) {
 	if status, _ := e.admin("/_mbongo/airtel/apps", map[string]string{}); status != 400 {
 		t.Fatalf("app without a name: %d", status)
 	}
-	status, app := e.admin("/_mbongo/airtel/apps", map[string]string{"name": "Shop", "callbackUrl": "https://shop.example/cb"})
+	status, app := e.admin("/_mbongo/airtel/apps", map[string]string{"name": "Acme", "callbackUrl": "https://acme.example/cb"})
 	if status != 201 || app["clientId"] == "" || app["clientSecret"] == "" || app["pin"] != "1234" {
 		t.Fatalf("app: %d %v", status, app)
 	}

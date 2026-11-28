@@ -1,0 +1,57 @@
+:root {
+  color-scheme: light dark;
+  --bg: #e9ecf0;
+  --card: #ffffff;
+  --ink: #1b1f24;
+  --muted: #5d6670;
+  --line: #d9dde2;
+  --accent: #1f6feb;
+  --good: #1a7f37;
+  --warn: #9a6700;
+  --bad: #cf222e;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0d1117;
+    --card: #161b22;
+    --ink: #e6edf3;
+    --muted: #9198a1;
+    --line: #30363d;
+    --accent: #4493f8;
+    --good: #3fb950;
+    --warn: #d29922;
+    --bad: #f85149;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); padding: 1.5rem; }
+main { max-width: 64rem; margin: 0 auto; background: var(--card); border: 1px solid var(--line); border-radius: 0.75rem; padding: 1.5rem 2rem; }
+h1 { font-size: 1.5rem; margin: 0.25rem 0 0.5rem; }
+h2 { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin: 2rem 0 0.75rem; }
+a { color: var(--accent); }
+code { font-size: 0.85em; overflow-wrap: anywhere; }
+.muted { color: var(--muted); }
+
+.runs { font-size: 0.9rem; color: var(--muted); }
+.runs a, .runs strong { margin-left: 0.35rem; }
+
+.count { display: inline-block; font-size: 0.85rem; font-weight: 600; padding: 0.15rem 0.6rem; border-radius: 1rem; border: 1px solid currentColor; }
+.count.error { color: var(--bad); }
+.count.warning { color: var(--warn); }
+.count.ok { color: var(--good); }
+
+table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+th { text-align: left; font-weight: 600; color: var(--muted); border-bottom: 1px solid var(--line); padding: 0.4rem 0.5rem; }
+td { border-bottom: 1px solid var(--line); padding: 0.5rem; vertical-align: top; }
+.calls td, .calls th { font-size: 0.8rem; padding: 0.3rem 0.4rem; }
+
+.finding { border: 1px solid var(--line); border-left: 4px solid var(--warn); border-radius: 0.5rem; padding: 0.6rem 1rem; margin: 0 0 0.75rem; }
+.finding.error { border-left-color: var(--bad); }
+.finding p { margin: 0.3rem 0; line-height: 1.45; }
+.badge { font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--warn); }
+.badge.error { color: var(--bad); }
+.evidence { margin: 0.4rem 0 0; padding-left: 1.1rem; color: var(--muted); }
+
+.limits { margin-top: 2.5rem; font-size: 0.85rem; color: var(--muted); }
+.limits ul { padding-left: 1.1rem; }

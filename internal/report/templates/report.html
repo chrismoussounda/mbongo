@@ -1,0 +1,114 @@
+{{define "head"}}<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{.}} · Mbongo report</title>
+<link rel="stylesheet" href="/_mbongo/report/static/report.css">
+</head>
+<body>
+<main>
+{{end}}
+
+{{define "foot"}}
+</main>
+</body>
+</html>
+{{end}}
+
+{{define "runs"}}
+<nav class="runs" aria-label="Runs">Run
+  {{range .}}{{if .Current}}<strong>{{.ID}}</strong>{{else}}<a href="{{.URL}}">{{.ID}}</a>{{end}} {{end}}
+</nav>
+{{end}}
+
+{{define "counts"}}<span class="count error">{{.Errors}} error{{if ne .Errors 1}}s{{end}}</span>
+<span class="count warning">{{.Warnings}} warning{{if ne .Warnings 1}}s{{end}}</span>{{end}}
+
+{{define "limits"}}
+<section class="limits">
+  <h2>What this report cannot see</h2>
+  <ul>{{range .}}<li>{{.}}</li>{{end}}</ul>
+</section>
+{{end}}
+
+{{define "index"}}{{template "head" "Integration report"}}
+<header>
+  <h1>Integration report</h1>
+  <p class="muted">Run {{.Run.ID}}, started {{day .Run.Started}}. Start a new one with
+    <code>POST /_mbongo/report/runs</code> (admin API).</p>
+  {{template "runs" .Runs}}
+  <p>{{template "counts" .}}</p>
+</header>
+{{with .Clients}}
+<table class="clients">
+  <thead><tr><th>Client</th><th>Operator</th><th>Calls</th><th>Callbacks</th><th>Findings</th></tr></thead>
+  <tbody>
+  {{range .}}<tr>
+    <td><a href="{{.URL}}">{{if .Name}}{{.Name}}{{else}}{{.Client}}{{end}}</a>{{if .Name}}<br><code class="muted">{{.Client}}</code>{{end}}</td>
+    <td>{{.OperatorName}}</td><td>{{.Calls}}</td><td>{{.Callbacks}}</td>
+    <td>{{if or .Errors .Warnings}}{{template "counts" .}}{{else}}<span class="count ok">clean</span>{{end}}</td>
+  </tr>{{end}}
+  </tbody>
+</table>
+{{else}}
+<p>No client has called Mbongo in this run yet.</p>
+{{end}}
+{{template "limits" .Limits}}
+{{template "foot"}}{{end}}
+
+{{define "client"}}{{template "head" (or .Report.Name .Report.Client)}}
+<header>
+  <p><a href="{{.Back}}">All clients</a></p>
+  <h1>{{if .Report.Name}}{{.Report.Name}}{{else}}{{.Report.Client}}{{end}}</h1>
+  <p class="muted">{{.OperatorName}} · <code>{{.Report.Client}}</code> · run {{.Run.ID}}, started {{day .Run.Started}} ·
+    {{.Report.Calls}} calls, {{.Report.Callbacks}} callbacks</p>
+  {{template "runs" .Runs}}
+  <p>{{if or .Report.Errors .Report.Warnings}}{{template "counts" .Report}}{{else}}<span class="count ok">No finding</span>{{end}}</p>
+</header>
+{{range .Groups}}
+<section class="group">
+  <h2>{{.Title}}</h2>
+  {{range .Findings}}
+  <article class="finding {{.Severity}}">
+    <p class="what"><span class="badge {{.Severity}}">{{.Severity}}</span> <code>{{.Check}}</code>{{with .Reference}} · <code>{{.}}</code>{{end}}</p>
+    <p>{{.Message}}</p>
+    {{with .Calls}}<ul class="evidence">{{range .}}<li><code>{{clock .At}} {{.Method}} {{.Path}} → {{if .Status}}{{.Status}}{{else}}no answer{{end}}{{with .Fault}} (rule: {{.}}){{end}}</code></li>{{end}}</ul>{{end}}
+  </article>
+  {{else}}
+  <p class="muted">Nothing found.</p>
+  {{end}}
+</section>
+{{end}}
+<section>
+  <h2>Calls</h2>
+  {{with .Calls}}
+  <table class="calls">
+    <thead><tr><th>Time</th><th>Call</th><th>Reference</th><th>Answer</th><th>Seen</th><th>Rule</th><th>ms</th></tr></thead>
+    <tbody>{{range .}}<tr>
+      <td>{{clock .At}}</td><td><code>{{.Method}} {{.Path}}</code></td><td><code>{{.Reference}}</code></td>
+      <td>{{if .Status}}{{.Status}}{{else}}none{{end}}</td><td>{{.Outcome}}</td><td>{{.Fault}}</td><td>{{.Millis}}</td>
+    </tr>{{end}}</tbody>
+  </table>
+  {{end}}
+</section>
+<section>
+  <h2>Callbacks</h2>
+  {{with .Callbacks}}
+  <table class="calls">
+    <thead><tr><th>Time</th><th>Reference</th><th>Outcome sent</th><th>Endpoint answered</th><th>Rule</th><th>ms</th></tr></thead>
+    <tbody>{{range .}}<tr>
+      <td>{{clock .At}}</td><td><code>{{.Reference}}</code></td><td>{{.Outcome}}</td>
+      <td>{{if .Error}}{{.Error}}{{else}}{{.HTTPStatus}}{{end}}</td><td>{{.Fault}}</td><td>{{.Millis}}</td>
+    </tr>{{end}}</tbody>
+  </table>
+  {{else}}<p class="muted">None sent.</p>{{end}}
+</section>
+{{template "limits" .Limits}}
+{{template "foot"}}{{end}}
+
+{{define "missing"}}{{template "head" "Not found"}}
+<h1>Not found</h1>
+<p>{{.What}}</p>
+<p><a href="/_mbongo/report/">Integration report</a></p>
+{{template "foot"}}{{end}}

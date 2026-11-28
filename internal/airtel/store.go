@@ -194,6 +194,14 @@ func (s *store) paymentWhere(ctx context.Context, where string, args []any, kind
 	return p, err
 }
 
+// newestRefund is the id of the app's latest refund of a payment, "" when there is none.
+func (s *store) newestRefund(ctx context.Context, clientID, moneyID string) string {
+	var id string
+	_ = s.db.QueryRowContext(ctx, `SELECT id FROM airtel_payments
+		WHERE client_id = ? AND kind = 'refund' AND refund_of = ? ORDER BY rowid DESC LIMIT 1`, clientID, moneyID).Scan(&id)
+	return id
+}
+
 // markNotified reports whether this call is the one that should send the callback.
 func (s *store) markNotified(ctx context.Context, clientID, id string) (bool, error) {
 	res, err := s.db.ExecContext(ctx, `UPDATE airtel_payments SET notified = 1

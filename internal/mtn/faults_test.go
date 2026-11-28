@@ -121,7 +121,7 @@ func TestStuckPaymentNeverEnds(t *testing.T) {
 func TestCallbackRules(t *testing.T) {
 	e := setup(t)
 	m := e.merchant("sandbox")
-	cb := map[string]string{"X-Callback-Url": "https://shop.example/cb"}
+	cb := map[string]string{"X-Callback-Url": "https://acme.example/cb"}
 
 	e.rule(faults.Rule{Operation: faults.Callback, Fault: faults.CallbackNever})
 	_ = m.requestToPay(ref1, pay("46733123453", "10", "EUR"), cb)

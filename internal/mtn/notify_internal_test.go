@@ -22,14 +22,14 @@ func TestACallbackIsSentOnlyOnce(t *testing.T) {
 	defer func() { _ = books.Close() }()
 	var sent atomic.Int32
 	s, err := New(ctx, books, slog.New(slog.NewTextHandler(io.Discard, nil)),
-		func(context.Context, string, []byte) error { sent.Add(1); return nil })
+		func(context.Context, string, []byte) (int, error) { sent.Add(1); return 200, nil })
 	if err != nil {
 		t.Fatal(err)
 	}
 	sub, _ := s.CreateSubscription(ctx, collection, "")
-	user, _, _ := s.CreateAPIUser(ctx, sub, "shop.example", MTNCongo)
+	user, _, _ := s.CreateAPIUser(ctx, sub, "acme.example", MTNCongo)
 	req := request{APIUser: user, ReferenceID: "r", Product: collection, Operation: opRequestToPay.name, PartyID: "242061234567",
-		Amount: "1", Currency: "XAF", CallbackURL: "https://shop.example/cb", Failure: "PAYER_NOT_FOUND"}
+		Amount: "1", Currency: "XAF", CallbackURL: "https://acme.example/cb", Failure: "PAYER_NOT_FOUND"}
 	if err := s.store.insertRequest(ctx, req); err != nil {
 		t.Fatal(err)
 	}

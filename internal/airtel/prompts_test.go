@@ -12,7 +12,7 @@ import (
 
 func TestPromptsAreTheWaitingCollections(t *testing.T) {
 	e := setup(t)
-	m := e.merchant(airtel.App{Name: "Boutique Mama"})
+	m := e.merchant(airtel.App{Name: "Acme"})
 	e.customer("055000001", 5000)
 	m.post("/merchant/v1/payments/", collection("055000001", "order-1", 1000))
 	e.clock.Advance(time.Second)
@@ -30,7 +30,7 @@ func TestPromptsAreTheWaitingCollections(t *testing.T) {
 		t.Fatalf("waiting %v %+v", err, all)
 	}
 	p := prompts[0]
-	if p.Payee != "Boutique Mama" || p.Message != "Order 7" || p.Amount != 1000 || p.Currency != "XAF" ||
+	if p.Payee != "Acme" || p.Message != "Order 7" || p.Amount != 1000 || p.Currency != "XAF" ||
 		!p.ExpiresAt.Equal(p.CreatedAt.Add(5*time.Minute)) {
 		t.Fatalf("first prompt %+v", p)
 	}
