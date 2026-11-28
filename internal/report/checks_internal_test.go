@@ -433,3 +433,136 @@ func TestARefusedStatusCallIsNoCheck(t *testing.T) {
 		t.Fatalf("%q", f.Message)
 	}
 }
+
+func (s *script) refund(ref, of, amount string) {
+	s.call(Call{Operation: "refund", Reference: ref, RefundOf: of, Amount: amount})
+}
+
+// paid makes r1 a collection of 1000 XAF the client saw succeed.
+func (s *script) paid() {
+	s.pay("r1", "o-1", "242061234567", "1000")
+	s.status("r1", Successful)
+	s.ends("r1", Successful)
+	s.ledger.targets["r1"] = Target{Reference: "r1", Operation: "requesttopay", Amount: "1000", Currency: "XAF"}
+}
+
+func TestRefundsDoneRight(t *testing.T) {
+	s := newScript(t)
+	s.paid()
+	s.refund("f1", "r1", "400")
+	s.status("f1", Successful)
+	s.ends("f1", Successful)
+	s.refund("f2", "r1", "600")
+	s.status("f2", Successful)
+	s.ends("f2", Successful)
+	if r := s.report(); len(r.Findings) != 0 {
+		t.Fatalf("%+v", r.Findings)
+	}
+}
+
+func TestARefundOfARefund(t *testing.T) {
+	s := newScript(t)
+	s.paid()
+	s.refund("f1", "r1", "1000")
+	s.status("f1", Successful)
+	s.ends("f1", Successful)
+	s.ledger.targets["f1"] = Target{Reference: "f1", Operation: "refund", Amount: "1000", Currency: "XAF"}
+	s.call(Call{Operation: "refund", Reference: "f2", RefundOf: "f1", Amount: "1000", Status: 404})
+	s.expect("refund_of_refund", Error, "f2")
+	s.none("over_refund")
+}
+
+func TestARefundOfAPayout(t *testing.T) {
+	s := newScript(t)
+	s.call(Call{Operation: "transfer", Reference: "p1", Phone: "242061234567", Amount: "5000"})
+	s.status("p1", Successful)
+	s.ends("p1", Successful)
+	s.ledger.targets["p1"] = Target{Reference: "p1", Operation: "transfer", Amount: "5000", Currency: "XAF"}
+	s.call(Call{Operation: "refund", Reference: "f1", RefundOf: "p1", Amount: "5000", Status: 404})
+	s.expect("refund_of_payout", Error, "f1")
+}
+
+func TestRefundingMoreThanWasPaid(t *testing.T) {
+	t.Run("at once", func(t *testing.T) {
+		s := newScript(t)
+		s.paid()
+		s.call(Call{Operation: "refund", Reference: "f1", RefundOf: "r1", Amount: "1500", Status: 500})
+		if f := s.expect("over_refund", Error, "f1"); !contains(f.Message, "1500 XAF") {
+			t.Fatalf("%q", f.Message)
+		}
+	})
+	t.Run("in two", func(t *testing.T) {
+		s := newScript(t)
+		s.paid()
+		s.refund("f1", "r1", "700")
+		s.status("f1", Successful)
+		s.ends("f1", Successful)
+		s.refund("f2", "r1", "700")
+		s.expect("over_refund", Error, "f2")
+	})
+	t.Run("after a failed one", func(t *testing.T) {
+		s := newScript(t)
+		s.paid()
+		s.refund("f1", "r1", "700")
+		s.status("f1", Failed)
+		s.ends("f1", Failed)
+		s.refund("f2", "r1", "700")
+		s.ends("f2", Successful)
+		s.status("f2", Successful)
+		s.none("over_refund")
+		s.none("refund_while_pending")
+	})
+	t.Run("one still on its way back", func(t *testing.T) {
+		s := newScript(t)
+		s.paid()
+		s.refund("f1", "r1", "700")
+		s.ends("f1", Pending)
+		s.refund("f2", "r1", "700")
+		s.expect("over_refund", Error, "f2")
+	})
+	t.Run("one resent with its reference", func(t *testing.T) {
+		s := newScript(t)
+		s.paid()
+		s.refund("f1", "r1", "700")
+		s.status("f1", Successful)
+		s.ends("f1", Successful)
+		s.call(Call{Operation: "refund", Reference: "f1", RefundOf: "r1", Amount: "700", Status: 409})
+		s.refund("f2", "r1", "300")
+		s.none("over_refund")
+	})
+	t.Run("whole payment twice", func(t *testing.T) {
+		s := newScript(t)
+		s.paid()
+		s.call(Call{Operator: "mtn", Operation: "refund", Reference: "f1", RefundOf: "r1"})
+		s.status("f1", Successful)
+		s.ends("f1", Successful)
+		s.call(Call{Operator: "mtn", Operation: "refund", Reference: "f2", RefundOf: "r1"})
+		s.expect("over_refund", Error, "f2")
+	})
+}
+
+func TestASecondRefundWhileTheFirstIsPending(t *testing.T) {
+	s := newScript(t)
+	s.paid()
+	s.refund("f1", "r1", "300")
+	s.status("f1", Pending)
+	s.ends("f1", Pending)
+	s.refund("f2", "r1", "300")
+	s.ends("f2", Successful)
+	f := s.expect("refund_while_pending", Error, "f2")
+	if len(f.Calls) != 2 {
+		t.Fatalf("%+v", f)
+	}
+	s.none("over_refund")
+}
+
+func TestARefusedRefundIsNoEarlierRefund(t *testing.T) {
+	s := newScript(t)
+	s.paid()
+	s.call(Call{Operation: "refund", Reference: "f1", RefundOf: "r1", Amount: "1000", Status: 400})
+	s.refund("f2", "r1", "1000")
+	s.status("f2", Successful)
+	s.ends("f2", Successful)
+	s.none("refund_while_pending")
+	s.none("over_refund")
+}
