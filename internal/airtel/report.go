@@ -116,3 +116,12 @@ func seenAs(status string) string {
 	}
 	return ""
 }
+
+// ClientName is the app's name.
+func (s *Service) ClientName(ctx context.Context, clientID string) (string, error) {
+	app, err := s.store.app(ctx, clientID)
+	if errors.Is(err, ErrNotFound) {
+		return "", nil
+	}
+	return app.Name, err
+}

@@ -34,7 +34,7 @@ func TestTheReportThroughTheAdmin(t *testing.T) {
 	clients := s["clients"].([]any)
 	first := clients[0].(map[string]any)
 	finding := first["findings"].([]any)[0].(map[string]any)
-	if len(clients) != 1 || first["client"] != client || first["operator"] != "airtel" ||
+	if len(clients) != 1 || first["client"] != client || first["operator"] != "airtel" || first["name"] != "Acme" ||
 		finding["check"] != "money_unconfirmed" || finding["severity"] != "error" || finding["reference"] != "order-1" {
 		t.Fatalf("clients: %v", clients)
 	}

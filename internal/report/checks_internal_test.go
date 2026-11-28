@@ -21,6 +21,10 @@ func (f fakeLedger) Outcome(_ context.Context, _, ref, _ string) (string, error)
 	return f.outcomes[ref], nil
 }
 
+func (fakeLedger) ClientName(_ context.Context, client string) (string, error) {
+	return "name of " + client, nil
+}
+
 func (f fakeLedger) RefundTarget(_ context.Context, _, of string) (Target, bool, error) {
 	t, ok := f.targets[of]
 	return t, ok, nil
@@ -160,7 +164,8 @@ func TestCleanTrafficHasNoFindings(t *testing.T) {
 	s.status("r1", Successful)
 	s.ends("r1", Successful)
 	r := s.report()
-	if len(r.Findings) != 0 || r.Errors != 0 || r.Warnings != 0 || r.Calls != 4 || r.Callbacks != 1 || r.Client != "u1" {
+	if len(r.Findings) != 0 || r.Errors != 0 || r.Warnings != 0 || r.Calls != 4 || r.Callbacks != 1 || r.Client != "u1" ||
+		r.Name != "name of u1" {
 		t.Fatalf("%+v", r)
 	}
 }

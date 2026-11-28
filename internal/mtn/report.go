@@ -118,3 +118,20 @@ func (s *Service) RefundTarget(ctx context.Context, user, ref string) (report.Ta
 	}
 	return t, err == nil, err
 }
+
+// ClientName is the API user's partner and product, as the partner portal shows them.
+func (s *Service) ClientName(ctx context.Context, user string) (string, error) {
+	var partner, key, product string
+	err := s.store.db.QueryRowContext(ctx, `SELECT s.partner, s.key, s.product FROM mtn_api_users u
+		JOIN mtn_subscriptions s ON s.key = u.subscription WHERE u.id = ?`, user).Scan(&partner, &key, &product)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	if partner == key {
+		return product, nil
+	}
+	return partner + ", " + product, nil
+}

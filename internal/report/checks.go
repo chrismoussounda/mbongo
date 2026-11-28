@@ -49,6 +49,8 @@ type Ledger interface {
 	// RefundTarget finds the payment a refund points at by what the client sent; found is
 	// false when there is none.
 	RefundTarget(ctx context.Context, client, refundOf string) (t Target, found bool, err error)
+	// ClientName is how people know the client, "" when it has no name.
+	ClientName(ctx context.Context, client string) (string, error)
 }
 
 // ClientReport is what the checks found in one client's traffic during a run.
@@ -56,6 +58,7 @@ type ClientReport struct {
 	Run       int64     `json:"run"`
 	Operator  string    `json:"operator"`
 	Client    string    `json:"client"`
+	Name      string    `json:"name,omitempty"`
 	Calls     int       `json:"calls"`
 	Callbacks int       `json:"callbacks"`
 	Errors    int       `json:"errors"`
@@ -187,6 +190,11 @@ func (rec *Recorder) Build(ctx context.Context, run int64, ledgers map[string]Le
 		}
 		r := ClientReport{Run: run, Operator: t.operator, Client: t.client, Calls: len(t.calls),
 			Callbacks: len(t.callbacks), Findings: []Finding{}}
+		if l := ledgers[t.operator]; l != nil {
+			if r.Name, err = l.ClientName(ctx, t.client); err != nil {
+				return nil, err
+			}
+		}
 		for _, check := range checks {
 			found, err := check(ctx, t, ledgers[t.operator])
 			if err != nil {

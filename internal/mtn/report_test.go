@@ -107,6 +107,17 @@ func TestTheLedgerTellsOutcomesAndRefundTargets(t *testing.T) {
 	if err != nil || !found || target != (report.Target{Reference: ref1, Operation: "requesttopay", Amount: "10", Currency: "EUR"}) {
 		t.Fatalf("target %+v %v %v", target, found, err)
 	}
+	if name, err := e.svc.ClientName(e.ctx, payouts.user); err != nil || name != "acme, disbursement" {
+		t.Fatalf("name %q %v", name, err)
+	}
+	alone, _ := e.svc.CreateSubscription(e.ctx, "collection", "")
+	aloneUser, _, _ := e.svc.CreateAPIUser(e.ctx, alone, "acme.example", mtn.Sandbox)
+	if name, err := e.svc.ClientName(e.ctx, aloneUser); err != nil || name != "collection" {
+		t.Fatalf("name without partner %q %v", name, err)
+	}
+	if name, err := e.svc.ClientName(e.ctx, "nobody"); err != nil || name != "" {
+		t.Fatalf("unknown %q %v", name, err)
+	}
 	stranger := e.partnerUser("another partner", "disbursement", mtn.Sandbox)
 	if _, found, err := e.svc.RefundTarget(e.ctx, stranger.user, ref1); err != nil || found {
 		t.Fatalf("another partner found it: %v %v", found, err)

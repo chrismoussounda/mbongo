@@ -115,6 +115,12 @@ func TestTheLedgerTellsOutcomesAndRefundTargets(t *testing.T) {
 	if err != nil || !found || target != (report.Target{Reference: "order-1", Operation: "collection", Amount: "1000", Currency: "XAF"}) {
 		t.Fatalf("target %+v %v %v", target, found, err)
 	}
+	if name, err := e.svc.ClientName(e.ctx, m.app.ClientID); err != nil || name != "Acme" {
+		t.Fatalf("name %q %v", name, err)
+	}
+	if name, err := e.svc.ClientName(e.ctx, "nobody"); err != nil || name != "" {
+		t.Fatalf("unknown %q %v", name, err)
+	}
 	if _, found, err := e.svc.RefundTarget(e.ctx, m.app.ClientID, "MP0"); err != nil || found {
 		t.Fatalf("unknown found: %v %v", found, err)
 	}
