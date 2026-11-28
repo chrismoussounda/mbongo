@@ -112,13 +112,13 @@ func setup(t *testing.T) *env {
 	if _, err := e.books.OpenCustomer(e.ctx, bank.MTN, number, "XAF", 10_000); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.books.OpenMerchant(e.ctx, bank.MTN, "shop", "XAF", 50_000); err != nil {
+	if _, err := e.books.OpenMerchant(e.ctx, bank.MTN, "acme", "XAF", 50_000); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := e.books.OpenCustomer(e.ctx, bank.Airtel, airtelN, "XAF", 5_000); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.books.OpenMerchant(e.ctx, bank.Airtel, "shop", "XAF", 50_000); err != nil {
+	if _, err := e.books.OpenMerchant(e.ctx, bank.Airtel, "acme", "XAF", 50_000); err != nil {
 		t.Fatal(err)
 	}
 	return e
@@ -174,7 +174,7 @@ func (e *env) open() {
 func (e *env) request(op bank.Operator, phone string, kind bank.Kind, amount int64) bank.Transaction {
 	e.t.Helper()
 	e.seq++
-	t, err := e.books.Request(e.ctx, bank.Request{Kind: kind, Operator: op, Merchant: "shop",
+	t, err := e.books.Request(e.ctx, bank.Request{Kind: kind, Operator: op, Merchant: "acme",
 		Phone: phone, Amount: amount, Currency: "XAF", PartnerRef: "ref-" + string(rune('a'+e.seq)),
 		ExternalID: "Order <7>"})
 	if err != nil {
@@ -298,7 +298,7 @@ func TestPromptPopsUpOverAnyScreen(t *testing.T) {
 func TestStuckPaymentHasNoCountdown(t *testing.T) {
 	e := setup(t)
 	e.open()
-	if _, err := e.books.Request(e.ctx, bank.Request{Kind: bank.Collection, Operator: bank.MTN, Merchant: "shop",
+	if _, err := e.books.Request(e.ctx, bank.Request{Kind: bank.Collection, Operator: bank.MTN, Merchant: "acme",
 		Phone: number, Amount: 1, Currency: "XAF", PartnerRef: "stuck", Window: 100 * 365 * 24 * time.Hour}); err != nil {
 		t.Fatal(err)
 	}
@@ -620,7 +620,7 @@ func TestListFeedAnnouncesNewPayments(t *testing.T) {
 func TestOnlyPromptsCanBeAnswered(t *testing.T) {
 	e := setup(t)
 	e.open()
-	cashOut, err := e.books.Request(e.ctx, bank.Request{Kind: bank.Collection, Operator: bank.MTN, Merchant: "shop",
+	cashOut, err := e.books.Request(e.ctx, bank.Request{Kind: bank.Collection, Operator: bank.MTN, Merchant: "acme",
 		Phone: number, Amount: 1, Currency: "XAF", PartnerRef: "cash", ExternalID: "cashout"})
 	if err != nil {
 		t.Fatal(err)

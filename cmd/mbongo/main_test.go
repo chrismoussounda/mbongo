@@ -238,7 +238,7 @@ func TestAutoCustomersReachTheAPI(t *testing.T) {
 		_ = json.NewDecoder(res.Body).Decode(&out)
 		return out
 	}
-	app := post("/_mbongo/airtel/apps", `{"name":"Shop"}`, map[string]string{"Authorization": "Bearer secret"})
+	app := post("/_mbongo/airtel/apps", `{"name":"Acme"}`, map[string]string{"Authorization": "Bearer secret"})
 	tok := post("/auth/oauth2/token", `{"client_id":"`+app["clientId"].(string)+`","client_secret":"`+
 		app["clientSecret"].(string)+`","grant_type":"client_credentials"}`, nil)
 	paid := post("/merchant/v1/payments/", `{"reference":"r","subscriber":{"country":"CG","currency":"XAF","msisdn":"055000009"},

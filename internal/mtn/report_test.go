@@ -28,7 +28,7 @@ func TestTheReportSeesCallsAndCallbacks(t *testing.T) {
 	e := setup(t)
 	e.receiver = http.StatusInternalServerError
 	m := e.merchant(mtn.Sandbox)
-	if a := m.requestToPay(ref1, pay("46733123453", "10", "EUR"), map[string]string{"X-Callback-Url": "https://shop.example/cb"}); a.status != 202 {
+	if a := m.requestToPay(ref1, pay("46733123453", "10", "EUR"), map[string]string{"X-Callback-Url": "https://acme.example/cb"}); a.status != 202 {
 		t.Fatalf("request to pay: %d", a.status)
 	}
 	if a := m.status(ref1); a.status != 200 {
@@ -63,7 +63,7 @@ func TestTheReportKnowsWhoseFaultItWas(t *testing.T) {
 	e.rule(faults.Rule{Operator: "mtn", Fault: faults.CallbackTwice, Times: 1})
 	_ = m.requestToPay(ref1, pay("46733123453", "10", "EUR"), nil)
 	const ref2 = "6c8f4e5b-2d3e-4f9a-8b1c-2d3e4f5a6b7c"
-	_ = m.requestToPay(ref2, pay("46733123453", "10", "EUR"), map[string]string{"X-Callback-Url": "https://shop.example/cb"})
+	_ = m.requestToPay(ref2, pay("46733123453", "10", "EUR"), map[string]string{"X-Callback-Url": "https://acme.example/cb"})
 	calls, cbs := e.recorded()
 	if c := calls[1]; c.Fault != faults.RateLimited || c.Status != http.StatusTooManyRequests || c.Client != m.user {
 		t.Fatalf("limited call %+v", c)

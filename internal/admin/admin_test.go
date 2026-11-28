@@ -117,7 +117,7 @@ func TestACongoPaymentFromStartToFinish(t *testing.T) {
 	}
 	key := sub["subscriptionKey"].(string)
 	status, user := e.admin("/_mbongo/mtn/api-users", map[string]string{"subscriptionKey": key,
-		"providerCallbackHost": "shop.example", "targetEnvironment": "mtncongo"})
+		"providerCallbackHost": "acme.example", "targetEnvironment": "mtncongo"})
 	if status != http.StatusCreated {
 		t.Fatalf("api user: %d %v", status, user)
 	}
@@ -214,7 +214,7 @@ func TestFundAPayoutAccount(t *testing.T) {
 	e := setup(t, adminToken)
 	_, sub := e.admin("/_mbongo/mtn/subscriptions", map[string]string{"product": "disbursement"})
 	_, user := e.admin("/_mbongo/mtn/api-users", map[string]string{"subscriptionKey": sub["subscriptionKey"].(string),
-		"providerCallbackHost": "shop.example", "targetEnvironment": "mtncongo"})
+		"providerCallbackHost": "acme.example", "targetEnvironment": "mtncongo"})
 	path := "/_mbongo/mtn/" + user["apiUser"].(string) + "/fund"
 
 	status, body := e.admin(path, map[string]string{"amount": "250000"})
@@ -239,7 +239,7 @@ func TestAirtelAppPaysThroughTheAdmin(t *testing.T) {
 	if status, _ := e.admin("/_mbongo/airtel/apps", map[string]string{}); status != 400 {
 		t.Fatalf("app without a name: %d", status)
 	}
-	status, app := e.admin("/_mbongo/airtel/apps", map[string]string{"name": "Shop", "callbackUrl": "https://shop.example/cb"})
+	status, app := e.admin("/_mbongo/airtel/apps", map[string]string{"name": "Acme", "callbackUrl": "https://acme.example/cb"})
 	if status != 201 || app["clientId"] == "" || app["clientSecret"] == "" || app["pin"] != "1234" {
 		t.Fatalf("app: %d %v", status, app)
 	}

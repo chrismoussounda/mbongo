@@ -29,7 +29,7 @@ func (f *fixture) storedStatus(id string) string {
 func TestReadingDoesNotWrite(t *testing.T) {
 	f := setup(t)
 	f.customer("242061234567", 10_000)
-	f.merchant("shop", 0)
+	f.merchant("acme", 0)
 	tx, _ := f.request(bank.Collection, "ref-1", 2_500)
 	f.clock.Advance(time.Hour)
 
@@ -45,7 +45,7 @@ func TestReadingDoesNotWrite(t *testing.T) {
 func TestExpireDueRecordsTheEndOfTheWindow(t *testing.T) {
 	f := setup(t)
 	f.customer("242061234567", 10_000)
-	f.merchant("shop", 0)
+	f.merchant("acme", 0)
 	due, _ := f.request(bank.Collection, "ref-1", 2_500)
 	f.clock.Advance(4 * time.Minute)
 	later, _ := f.request(bank.Collection, "ref-2", 100)
@@ -68,7 +68,7 @@ func TestExpireDueRecordsTheEndOfTheWindow(t *testing.T) {
 func TestApprovingAnExpiredPaymentRecordsTheExpiry(t *testing.T) {
 	f := setup(t)
 	f.customer("242061234567", 10_000)
-	f.merchant("shop", 0)
+	f.merchant("acme", 0)
 	tx, _ := f.request(bank.Collection, "ref-1", 2_500)
 	f.clock.Advance(time.Hour)
 
@@ -83,7 +83,7 @@ func TestApprovingAnExpiredPaymentRecordsTheExpiry(t *testing.T) {
 func TestBadTimeInTheDatabaseIsAnError(t *testing.T) {
 	f := setup(t)
 	f.customer("242061234567", 10_000)
-	f.merchant("shop", 0)
+	f.merchant("acme", 0)
 	tx, _ := f.request(bank.Collection, "ref-1", 2_500)
 	_ = f.bank.Close()
 	db, err := sql.Open("sqlite", "file:"+f.path)
@@ -104,7 +104,7 @@ func TestBadTimeInTheDatabaseIsAnError(t *testing.T) {
 func TestExpireDueAtTheExactEnd(t *testing.T) {
 	f := setup(t)
 	f.customer("242061234567", 10_000)
-	f.merchant("shop", 0)
+	f.merchant("acme", 0)
 	_, _ = f.request(bank.Collection, "ref-1", 2_500)
 	f.clock.Advance(5 * time.Minute)
 	if n, err := f.bank.ExpireDue(f.ctx); err != nil || n != 1 {

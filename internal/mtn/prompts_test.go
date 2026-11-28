@@ -18,7 +18,7 @@ func TestPromptsAreTheWaitingRequestsToPay(t *testing.T) {
 	if _, err := e.svc.Fund(e.ctx, payouts.user, 10_000); err != nil {
 		t.Fatal(err)
 	}
-	_ = m.requestToPay(ref1, pay("242061234567", "2500", "XAF"), map[string]string{"X-Callback-Url": "https://shop.example/cb"})
+	_ = m.requestToPay(ref1, pay("242061234567", "2500", "XAF"), map[string]string{"X-Callback-Url": "https://acme.example/cb"})
 	e.clock.Advance(time.Second)
 	_ = m.requestToPay(ref2, pay("242061234567", "100", "XAF"), nil)
 

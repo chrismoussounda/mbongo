@@ -1,6 +1,6 @@
 # The phone
 
-The phone stands in for the customer's handset. When your shop asks a customer to pay, the request
+The phone stands in for the customer's handset. When your app asks a customer to pay, the request
 pops up on the phone: approve it, refuse it or ignore it, then check what your integration received.
 The SMS show what the customer would get.
 
@@ -34,8 +34,8 @@ its alerts button; clicking it opens that phone.
 - **Home screen.** Status bar with the time, the signal of each SIM and the battery, and three apps:
   Messages, and one wallet app per SIM (MTN MoMo, Airtel Money). Badges count unread SMS and payments
   waiting.
-- **Pop-up.** A payment a shop asks for pops up over whatever app is open, with the SIM it came on,
-  who asks, how much, the shop's message (MTN `payerMessage`, Airtel `reference`) and the time left.
+- **Pop-up.** A payment your app asks for pops up over whatever app is open, with the SIM it came on,
+  who asks, how much, your app's message (MTN `payerMessage`, Airtel `reference`) and the time left.
   The phone shakes. With the tab in the background, a browser notification shows too, once allowed
   with the Alerts button.
 - **Approve** moves the money: MTN `SUCCESSFUL`, Airtel `TS`.
@@ -63,7 +63,7 @@ payment held by a `stuck` rule pops up with no time limit.
 | Money received | `Vous avez reçu 1 000 FCFA de Boutique Mama. Nouveau solde: 8 500 FCFA. Ref: 2852348891.` |
 
 The sender is `MoMo` or `AirtelMoney`. The reference is MTN's `financialTransactionId` or Airtel's
-`airtel_money_id`, the same the shop gets.
+`airtel_money_id`, the same your app gets.
 
 The phone pages are open to anyone who can reach Mbongo, like the rest of a test server; only the
 admin API needs `MBONGO_ADMIN_TOKEN`. Forms refuse posts from other sites.

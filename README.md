@@ -19,7 +19,7 @@ early. At the end, it tells you what your app got wrong.
 Early work. MTN's collection and payout APIs work, in their sandbox flavour and their Congo flavour, and
 so do Airtel Money Congo's collections, refunds, cash-in, cash-out and payouts, all on top of books where
 every movement adds up to zero. Tests can make either operator fail on purpose, and each customer has
-a phone page to approve or refuse what a shop asks.
+a phone page to approve or refuse what your app asks.
 
 | Step | What | State |
 | --- | --- | --- |
@@ -72,7 +72,7 @@ expires). As in MTN's sandbox, balance and account holder checks are refused.
 
 ```sh
 curl -X POST localhost:8080/_mbongo/mtn/api-users -H "Authorization: Bearer $MBONGO_ADMIN_TOKEN" \
-  -d '{"subscriptionKey":"...","providerCallbackHost":"shop.example","targetEnvironment":"mtncongo"}'
+  -d '{"subscriptionKey":"...","providerCallbackHost":"acme.example","targetEnvironment":"mtncongo"}'
 curl -X POST localhost:8080/_mbongo/customers -H "Authorization: Bearer $MBONGO_ADMIN_TOKEN" \
   -d '{"operator":"mtn","phone":"242061234567","currency":"XAF","balance":"5000"}'
 # after your app asks for a payment:
@@ -83,7 +83,7 @@ curl -X POST localhost:8080/_mbongo/mtn/<apiUser>/requests/<X-Reference-Id>/appr
 A payer who doesn't answer within five minutes lets the payment expire.
 
 **Payouts** (`transfer`, `deposit`, `refund`) need a `disbursement` subscription and API user of their
-own. Give both subscriptions the same `partner` (`{"product":"disbursement","partner":"my-shop"}`) so
+own. Give both subscriptions the same `partner` (`{"product":"disbursement","partner":"my-company"}`) so
 refunds can reach your collections. In Congo, top up the account payouts are paid from first:
 
 ```sh
@@ -98,7 +98,7 @@ Airtel's portal; the answer has the client id and secret, and the PIN payouts ne
 give one). Callbacks go to `callbackUrl`, signed when you give a `callbackKey`:
 
 ```sh
-curl -X POST localhost:8080/_mbongo/airtel/apps -H "Authorization: Bearer $MBONGO_ADMIN_TOKEN"   -d '{"name":"My Shop","callbackUrl":"https://shop.example/airtel","callbackKey":"secret"}'
+curl -X POST localhost:8080/_mbongo/airtel/apps -H "Authorization: Bearer $MBONGO_ADMIN_TOKEN"   -d '{"name":"Acme","callbackUrl":"https://acme.example/airtel","callbackKey":"secret"}'
 curl -X POST localhost:8080/_mbongo/customers -H "Authorization: Bearer $MBONGO_ADMIN_TOKEN"   -d '{"operator":"airtel","phone":"055123456","currency":"XAF","balance":"5000"}'
 # after your app asks for a payment (POST /merchant/v1/payments/):
 curl -X POST localhost:8080/_mbongo/airtel/<clientId>/payments/<transaction.id>/approve   -H "Authorization: Bearer $MBONGO_ADMIN_TOKEN"
@@ -112,8 +112,8 @@ Encrypt the PIN with the key from `GET /v1/rsa/encryption-keys`, as with Airtel.
 ## Approve on the phone
 
 Instead of the approve calls above, open `/_mbongo/phone/` and pick a phone. Every customer has one,
-holding one or two SIMs (`"sameDeviceAs"` puts a new customer in another number's phone). Payments the
-shop asks for pop up on it: approve, refuse, or ignore and let them expire. An SMS arrives for each
+holding one or two SIMs (`"sameDeviceAs"` puts a new customer in another number's phone). Payments your
+app asks for pop up on it: approve, refuse, or ignore and let them expire. An SMS arrives for each
 money move, and the page updates by itself.
 
 See [docs/phone.md](docs/phone.md).

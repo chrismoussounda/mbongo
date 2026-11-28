@@ -135,7 +135,7 @@ func (e *env) merchant(environment string) *merchant {
 
 func (e *env) user(product, environment string) *merchant {
 	e.t.Helper()
-	return e.partnerUser("shop", product, environment)
+	return e.partnerUser("acme", product, environment)
 }
 
 func (e *env) partnerUser(partner, product, environment string) *merchant {
@@ -144,7 +144,7 @@ func (e *env) partnerUser(partner, product, environment string) *merchant {
 	if err != nil {
 		e.t.Fatal(err)
 	}
-	user, key, err := e.svc.CreateAPIUser(e.ctx, sub, "shop.example", environment)
+	user, key, err := e.svc.CreateAPIUser(e.ctx, sub, "acme.example", environment)
 	if err != nil {
 		e.t.Fatal(err)
 	}
@@ -220,14 +220,14 @@ func TestSandboxProvisioning(t *testing.T) {
 	sub, _ := e.svc.CreateSubscription(e.ctx, "collection", "")
 	h := map[string]string{"Ocp-Apim-Subscription-Key": sub, "X-Reference-Id": ref1}
 
-	if a := e.call(http.MethodPost, "/v1_0/apiuser", h, map[string]string{"providerCallbackHost": "shop.example"}); a.status != 201 {
+	if a := e.call(http.MethodPost, "/v1_0/apiuser", h, map[string]string{"providerCallbackHost": "acme.example"}); a.status != 201 {
 		t.Fatalf("create: %d %v", a.status, a.body)
 	}
-	if a := e.call(http.MethodPost, "/v1_0/apiuser", h, map[string]string{"providerCallbackHost": "shop.example"}); a.status != 409 || a.body["code"] != "RESOURCE_ALREADY_EXIST" {
+	if a := e.call(http.MethodPost, "/v1_0/apiuser", h, map[string]string{"providerCallbackHost": "acme.example"}); a.status != 409 || a.body["code"] != "RESOURCE_ALREADY_EXIST" {
 		t.Fatalf("again: %d %v", a.status, a.body)
 	}
 	a := e.call(http.MethodGet, "/v1_0/apiuser/"+ref1, h, nil)
-	if a.status != 200 || a.body["providerCallbackHost"] != "shop.example" || a.body["targetEnvironment"] != "sandbox" {
+	if a.status != 200 || a.body["providerCallbackHost"] != "acme.example" || a.body["targetEnvironment"] != "sandbox" {
 		t.Fatalf("get: %d %v", a.status, a.body)
 	}
 	a = e.call(http.MethodPost, "/v1_0/apiuser/"+ref1+"/apikey", h, nil)
@@ -320,7 +320,7 @@ func TestCallsNeedAValidToken(t *testing.T) {
 func TestSandboxPaymentSucceeds(t *testing.T) {
 	e := setup(t)
 	m := e.merchant("sandbox")
-	a := m.requestToPay(ref1, pay("46733123453", "25.50", "EUR"), map[string]string{"X-Callback-Url": "https://shop.example/momo"})
+	a := m.requestToPay(ref1, pay("46733123453", "25.50", "EUR"), map[string]string{"X-Callback-Url": "https://acme.example/momo"})
 	if a.status != 202 || a.body != nil {
 		t.Fatalf("request: %d %v", a.status, a.body)
 	}
@@ -338,7 +338,7 @@ func TestSandboxPaymentSucceeds(t *testing.T) {
 		t.Fatalf("balance in the sandbox: %d %v", b.status, b.body)
 	}
 	got := e.waitCallbacks(1)
-	if len(got) != 1 || got[0].url != "https://shop.example/momo" || got[0].body["status"] != "SUCCESSFUL" {
+	if len(got) != 1 || got[0].url != "https://acme.example/momo" || got[0].body["status"] != "SUCCESSFUL" {
 		t.Fatalf("callbacks: %+v", got)
 	}
 	if err := e.books.Check(e.ctx); err != nil {
@@ -442,7 +442,7 @@ func TestCongoPaymentWaitsForThePayer(t *testing.T) {
 		t.Fatal("account holder check is wrong")
 	}
 
-	_ = m.requestToPay(ref1, pay("242061234567", "2500", "XAF"), map[string]string{"X-Callback-Url": "https://shop.example/cb"})
+	_ = m.requestToPay(ref1, pay("242061234567", "2500", "XAF"), map[string]string{"X-Callback-Url": "https://acme.example/cb"})
 	if s := m.status(ref1); s.body["status"] != "PENDING" || s.body["financialTransactionId"] != nil || s.body["reason"] != nil {
 		t.Fatalf("before approval: %v", s.body)
 	}

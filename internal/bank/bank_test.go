@@ -76,7 +76,7 @@ func (f *fixture) check() {
 
 func (f *fixture) request(kind bank.Kind, ref string, amount int64) (bank.Transaction, error) {
 	return f.bank.Request(f.ctx, bank.Request{
-		Kind: kind, Operator: bank.MTN, Merchant: "shop", Phone: "242061234567",
+		Kind: kind, Operator: bank.MTN, Merchant: "acme", Phone: "242061234567",
 		Amount: amount, Currency: "XAF", PartnerRef: ref, ExternalID: "order-1",
 		Window: 5 * time.Minute,
 	})
@@ -85,7 +85,7 @@ func (f *fixture) request(kind bank.Kind, ref string, amount int64) (bank.Transa
 func TestOpeningBalancesComeFromSomewhere(t *testing.T) {
 	f := setup(t)
 	c := f.customer("242061234567", 10_000)
-	m := f.merchant("shop", 0)
+	m := f.merchant("acme", 0)
 	if f.balance(c) != 10_000 || f.balance(m) != 0 {
 		t.Fatalf("balances %d %d", f.balance(c), f.balance(m))
 	}
@@ -109,7 +109,7 @@ func TestSameAccountTwiceIsRefused(t *testing.T) {
 
 func TestCollectionMovesNothingUntilApproved(t *testing.T) {
 	f := setup(t)
-	c, m := f.customer("242061234567", 10_000), f.merchant("shop", 0)
+	c, m := f.customer("242061234567", 10_000), f.merchant("acme", 0)
 
 	tx, err := f.request(bank.Collection, "ref-1", 2_500)
 	if err != nil {
@@ -132,7 +132,7 @@ func TestCollectionMovesNothingUntilApproved(t *testing.T) {
 func TestCollectionFailsWithoutFunds(t *testing.T) {
 	f := setup(t)
 	c := f.customer("242061234567", 1_000)
-	f.merchant("shop", 0)
+	f.merchant("acme", 0)
 	tx, _ := f.request(bank.Collection, "ref-1", 2_500)
 
 	tx, err := f.bank.Approve(f.ctx, tx.ID)
@@ -147,7 +147,7 @@ func TestCollectionFailsWithoutFunds(t *testing.T) {
 
 func TestPayoutMovesMoneyFromTheMerchant(t *testing.T) {
 	f := setup(t)
-	c, m := f.customer("242061234567", 0), f.merchant("shop", 5_000)
+	c, m := f.customer("242061234567", 0), f.merchant("acme", 5_000)
 	tx, _ := f.request(bank.Payout, "ref-1", 3_000)
 
 	tx, err := f.bank.Approve(f.ctx, tx.ID)
@@ -169,7 +169,7 @@ func TestPayoutMovesMoneyFromTheMerchant(t *testing.T) {
 func TestRefusedCollectionMovesNothing(t *testing.T) {
 	f := setup(t)
 	c := f.customer("242061234567", 10_000)
-	f.merchant("shop", 0)
+	f.merchant("acme", 0)
 	tx, _ := f.request(bank.Collection, "ref-1", 2_500)
 
 	tx, err := f.bank.Refuse(f.ctx, tx.ID, bank.ReasonRefused)
@@ -184,7 +184,7 @@ func TestRefusedCollectionMovesNothing(t *testing.T) {
 func TestDecidedTransactionCannotBeDecidedAgain(t *testing.T) {
 	f := setup(t)
 	f.customer("242061234567", 10_000)
-	f.merchant("shop", 0)
+	f.merchant("acme", 0)
 	tx, _ := f.request(bank.Collection, "ref-1", 2_500)
 	_, _ = f.bank.Approve(f.ctx, tx.ID)
 
@@ -200,7 +200,7 @@ func TestDecidedTransactionCannotBeDecidedAgain(t *testing.T) {
 func TestPendingCollectionExpires(t *testing.T) {
 	f := setup(t)
 	c := f.customer("242061234567", 10_000)
-	f.merchant("shop", 0)
+	f.merchant("acme", 0)
 	tx, _ := f.request(bank.Collection, "ref-1", 2_500)
 	untouched, _ := f.request(bank.Collection, "ref-2", 100)
 
@@ -231,14 +231,14 @@ func TestPendingCollectionExpires(t *testing.T) {
 func TestPartnerRefIsUniquePerMerchant(t *testing.T) {
 	f := setup(t)
 	f.customer("242061234567", 10_000)
-	f.merchant("shop", 0)
+	f.merchant("acme", 0)
 	first, _ := f.request(bank.Collection, "ref-1", 2_500)
 
 	_, err := f.request(bank.Collection, "ref-1", 9_999)
 	if !errors.Is(err, bank.ErrDuplicate) {
 		t.Fatalf("err = %v, want ErrDuplicate", err)
 	}
-	found, err := f.bank.ByPartnerRef(f.ctx, bank.MTN, "shop", "ref-1")
+	found, err := f.bank.ByPartnerRef(f.ctx, bank.MTN, "acme", "ref-1")
 	if err != nil || found.ID != first.ID || found.Amount != 2_500 {
 		t.Fatalf("found %+v, %v", found, err)
 	}
@@ -246,7 +246,7 @@ func TestPartnerRefIsUniquePerMerchant(t *testing.T) {
 
 func TestUnknownCustomerAndMerchant(t *testing.T) {
 	f := setup(t)
-	f.merchant("shop", 0)
+	f.merchant("acme", 0)
 	if _, err := f.request(bank.Collection, "ref-1", 100); !errors.Is(err, bank.ErrNoCustomer) {
 		t.Fatalf("err = %v, want ErrNoCustomer", err)
 	}
@@ -264,14 +264,14 @@ func TestUnknownCustomerAndMerchant(t *testing.T) {
 func TestRequestIsValidated(t *testing.T) {
 	f := setup(t)
 	f.customer("242061234567", 10_000)
-	f.merchant("shop", 0)
+	f.merchant("acme", 0)
 	for _, amount := range []int64{0, -5} {
 		if _, err := f.request(bank.Collection, "r", amount); !errors.Is(err, bank.ErrInvalid) {
 			t.Errorf("amount %d: %v", amount, err)
 		}
 	}
 	_, err := f.bank.Request(f.ctx, bank.Request{Kind: bank.Collection, Operator: bank.MTN,
-		Merchant: "shop", Phone: "242061234567", Amount: 1, Currency: "EUR", PartnerRef: "r"})
+		Merchant: "acme", Phone: "242061234567", Amount: 1, Currency: "EUR", PartnerRef: "r"})
 	if !errors.Is(err, bank.ErrCurrency) {
 		t.Fatalf("err = %v, want ErrCurrency", err)
 	}
@@ -279,7 +279,7 @@ func TestRequestIsValidated(t *testing.T) {
 		t.Fatalf("unknown currency account: %v", err)
 	}
 	_, err = f.bank.Request(f.ctx, bank.Request{Kind: bank.Collection, Operator: bank.MTN,
-		Merchant: "shop", Phone: "242061234567", Amount: 1, Currency: "ZZZ", PartnerRef: "r"})
+		Merchant: "acme", Phone: "242061234567", Amount: 1, Currency: "ZZZ", PartnerRef: "r"})
 	if !errors.Is(err, bank.ErrCurrency) {
 		t.Fatalf("unknown currency request: %v", err)
 	}
@@ -287,7 +287,7 @@ func TestRequestIsValidated(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = f.bank.Request(f.ctx, bank.Request{Kind: bank.Collection, Operator: bank.MTN,
-		Merchant: "shop", Phone: "242069999999", Amount: 1, Currency: "XAF", PartnerRef: "r"})
+		Merchant: "acme", Phone: "242069999999", Amount: 1, Currency: "XAF", PartnerRef: "r"})
 	if !errors.Is(err, bank.ErrCurrency) {
 		t.Fatalf("customer in EUR: err = %v, want ErrCurrency", err)
 	}
@@ -296,7 +296,7 @@ func TestRequestIsValidated(t *testing.T) {
 func TestStateSurvivesARestart(t *testing.T) {
 	f := setup(t)
 	c := f.customer("242061234567", 10_000)
-	f.merchant("shop", 0)
+	f.merchant("acme", 0)
 	tx, _ := f.request(bank.Collection, "ref-1", 2_500)
 	_, _ = f.bank.Approve(f.ctx, tx.ID)
 	if err := f.bank.Close(); err != nil {
@@ -317,22 +317,22 @@ func TestStateSurvivesARestart(t *testing.T) {
 func TestRequestWithSavesNothingWhenTheExtraStepFails(t *testing.T) {
 	f := setup(t)
 	f.customer("242061234567", 10_000)
-	f.merchant("shop", 0)
+	f.merchant("acme", 0)
 	boom := errors.New("boom")
-	_, err := f.bank.RequestWith(f.ctx, bank.Request{Kind: bank.Collection, Operator: bank.MTN, Merchant: "shop",
+	_, err := f.bank.RequestWith(f.ctx, bank.Request{Kind: bank.Collection, Operator: bank.MTN, Merchant: "acme",
 		Phone: "242061234567", Amount: 100, Currency: "XAF", PartnerRef: "ref-1"},
 		func(*sql.Tx, bank.Transaction) error { return boom })
 	if !errors.Is(err, boom) {
 		t.Fatalf("err = %v", err)
 	}
-	if _, err := f.bank.ByPartnerRef(f.ctx, bank.MTN, "shop", "ref-1"); !errors.Is(err, bank.ErrNotFound) {
+	if _, err := f.bank.ByPartnerRef(f.ctx, bank.MTN, "acme", "ref-1"); !errors.Is(err, bank.ErrNotFound) {
 		t.Fatalf("the transaction was kept: %v", err)
 	}
 }
 
 func TestFundTopsUpFromTheMint(t *testing.T) {
 	f := setup(t)
-	m := f.merchant("shop", 1_000)
+	m := f.merchant("acme", 1_000)
 	got, err := f.bank.Fund(f.ctx, m.ID, 4_000)
 	if err != nil || got.Balance != 5_000 || f.balance(m) != 5_000 {
 		t.Fatalf("%+v, %v, stored %d", got, err, f.balance(m))
@@ -350,7 +350,7 @@ func TestFundTopsUpFromTheMint(t *testing.T) {
 
 func TestRequestUsesTheWalletInItsCurrency(t *testing.T) {
 	f := setup(t)
-	f.merchant("shop", 0)
+	f.merchant("acme", 0)
 	for _, cur := range []string{"EUR", "XAF", "XOF"} {
 		if _, err := f.bank.OpenCustomer(f.ctx, bank.MTN, "242061234567", cur, 0); err != nil {
 			t.Fatal(err)

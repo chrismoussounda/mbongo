@@ -155,10 +155,10 @@ type merchant struct {
 func (e *env) merchant(app airtel.App) *merchant {
 	e.t.Helper()
 	if app.Name == "" {
-		app.Name = "Shop"
+		app.Name = "Acme"
 	}
 	if app.CallbackURL == "" {
-		app.CallbackURL = "https://shop.example/airtel"
+		app.CallbackURL = "https://acme.example/airtel"
 	}
 	app, err := e.svc.CreateApp(e.ctx, app)
 	if err != nil {
@@ -336,8 +336,8 @@ func TestCollectionWaitsForTheCustomer(t *testing.T) {
 	}
 	cb := e.waitCallbacks(1)[0]
 	tx, _ := cb.body["transaction"].(map[string]any)
-	if cb.url != "https://shop.example/airtel" || tx["status_code"] != "TS" || tx["id"] != "order-1" ||
-		tx["airtel_money_id"] != moneyID || !strings.Contains(tx["message"].(string), "XAF 1,000 to SHOP") ||
+	if cb.url != "https://acme.example/airtel" || tx["status_code"] != "TS" || tx["id"] != "order-1" ||
+		tx["airtel_money_id"] != moneyID || !strings.Contains(tx["message"].(string), "XAF 1,000 to ACME") ||
 		cb.body["hash"] != nil {
 		t.Fatalf("callback: %+v", cb.body)
 	}

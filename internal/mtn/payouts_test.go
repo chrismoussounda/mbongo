@@ -194,7 +194,7 @@ func TestRefundNeedsASuccessfulPayment(t *testing.T) {
 	if a := d.post("refund", ref2, refund(ref3, "1")); a.status != 500 || a.body["code"] != "TRANSACTION_NOT_FOUND" {
 		t.Fatalf("refund of a transfer: %d %v", a.status, a.body)
 	}
-	stranger := e.partnerUser("another shop", "disbursement", "sandbox")
+	stranger := e.partnerUser("another partner", "disbursement", "sandbox")
 	if a := stranger.post("refund", ref2, refund(ref1, "1")); a.status != 500 || a.body["code"] != "TRANSACTION_NOT_FOUND" {
 		t.Fatalf("refund of another partner's payment: %d %v", a.status, a.body)
 	}
@@ -255,7 +255,7 @@ func TestPayoutsSendTheirCallback(t *testing.T) {
 	c := e.merchant("sandbox")
 	d := e.user("disbursement", "sandbox")
 	_ = c.requestToPay(ref1, pay("46733123453", "20", "EUR"), nil)
-	h := map[string]string{"X-Callback-Url": "https://shop.example/payouts"}
+	h := map[string]string{"X-Callback-Url": "https://acme.example/payouts"}
 	_ = e.call(http.MethodPost, "/disbursement/v1_0/transfer", d.headers(map[string]string{"X-Reference-Id": ref2,
 		"X-Callback-Url": h["X-Callback-Url"]}), send("46733123453", "5", "EUR"))
 	_ = e.call(http.MethodPost, "/disbursement/v1_0/refund", d.headers(map[string]string{"X-Reference-Id": ref3,

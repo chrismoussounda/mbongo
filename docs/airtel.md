@@ -66,7 +66,7 @@ DP codes per product (docs), and the ones borrowed where a product has none (ass
 Airtel posts to the one URL set for the application, not one per request (docs). Mbongo sends one POST
 after a collection is approved or refused, and after a cash-out, never retried:
 `{"transaction": {id, message, status_code: "TS" | "TF", airtel_money_id}}` (docs). A successful
-message reads like the docs' example, "Paid XAF 1,000 to SHOP Charge XAF 0, Trans ID MP…".
+message follows the docs' example, "Paid XAF 1,000 to <APP NAME> Charge XAF 0, Trans ID MP…".
 
 When the app has a callback key, the body also carries `hash`: HMAC-SHA256 with that key, in Base64
 (docs). The docs don't say which bytes are hashed; Mbongo hashes the `transaction` object exactly as
