@@ -94,7 +94,7 @@ func run(ctx context.Context, getenv func(string) string, out io.Writer) error {
 	srv := &http.Server{
 		Addr: address(getenv),
 		Handler: server.New(logger, version, books, momo.Routes, airtelMoney.Routes, func(mux *http.ServeMux) {
-			admin.Routes(mux, getenv("MBONGO_ADMIN_TOKEN"), books, momo, airtelMoney, rules, phones, logger)
+			admin.Routes(mux, getenv("MBONGO_ADMIN_TOKEN"), books, momo, airtelMoney, rules, phones, journal, logger)
 		}, func(mux *http.ServeMux) {
 			phones.Routes(ctx, mux)
 		}),

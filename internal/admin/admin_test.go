@@ -22,6 +22,7 @@ import (
 	"github.com/chrismoussounda/mbongo/internal/faults"
 	"github.com/chrismoussounda/mbongo/internal/mtn"
 	"github.com/chrismoussounda/mbongo/internal/phone"
+	"github.com/chrismoussounda/mbongo/internal/report"
 )
 
 const adminToken = "letmein"
@@ -53,8 +54,12 @@ func setup(t *testing.T, token string) *env {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m.WithFaults(rules)
-	a.WithFaults(rules)
+	journal, err := report.New(ctx, books.DB(), books.Clock())
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.WithFaults(rules).WithReport(journal)
+	a.WithFaults(rules).WithReport(journal)
 	mux := http.NewServeMux()
 	m.Routes(mux)
 	a.Routes(mux)
@@ -62,7 +67,7 @@ func setup(t *testing.T, token string) *env {
 	if err != nil {
 		t.Fatal(err)
 	}
-	admin.Routes(mux, token, books, m, a, rules, phones, logger)
+	admin.Routes(mux, token, books, m, a, rules, phones, journal, logger)
 	e := &env{t: t, server: httptest.NewServer(mux), books: books, phones: phones}
 	t.Cleanup(func() { e.server.Close(); m.Wait(); a.Wait(); _ = books.Close() })
 	return e
