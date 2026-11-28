@@ -56,11 +56,11 @@ payment held by a `stuck` rule pops up with no time limit.
 
 | Event | Text |
 | --- | --- |
-| Payment made | `Vous avez payé 2 500 FCFA à Boutique Mama. Frais: 0 FCFA. Nouveau solde: 7 500 FCFA. Ref: 2852348891.` |
-| Refused | `Vous avez refusé le paiement de 100 FCFA demandé par Boutique Mama.` |
-| Not enough money | `Echec du paiement de 99 999 FCFA à Boutique Mama: solde insuffisant. Solde: 7 500 FCFA.` |
-| Expired | `La demande de paiement de 300 FCFA de Boutique Mama a expiré sans réponse.` |
-| Money received | `Vous avez reçu 1 000 FCFA de Boutique Mama. Nouveau solde: 8 500 FCFA. Ref: 2852348891.` |
+| Payment made | `Vous avez payé 2 500 FCFA à Acme. Frais: 0 FCFA. Nouveau solde: 7 500 FCFA. Ref: 2852348891.` |
+| Refused | `Vous avez refusé le paiement de 100 FCFA demandé par Acme.` |
+| Not enough money | `Echec du paiement de 99 999 FCFA à Acme: solde insuffisant. Solde: 7 500 FCFA.` |
+| Expired | `La demande de paiement de 300 FCFA de Acme a expiré sans réponse.` |
+| Money received | `Vous avez reçu 1 000 FCFA de Acme. Nouveau solde: 8 500 FCFA. Ref: 2852348891.` |
 
 The sender is `MoMo` or `AirtelMoney`. The reference is MTN's `financialTransactionId` or Airtel's
 `airtel_money_id`, the same your app gets.

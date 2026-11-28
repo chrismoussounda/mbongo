@@ -10,8 +10,8 @@ import (
 
 func TestPromptsAreTheWaitingRequestsToPay(t *testing.T) {
 	e := setup(t)
-	m := e.partnerUser("Boutique Mama", "collection", "mtncongo")
-	payouts := e.partnerUser("Boutique Mama", "disbursement", "mtncongo")
+	m := e.partnerUser("Acme", "collection", "mtncongo")
+	payouts := e.partnerUser("Acme", "disbursement", "mtncongo")
 	if _, err := e.books.OpenCustomer(e.ctx, bank.MTN, "242061234567", "XAF", 5_000); err != nil {
 		t.Fatal(err)
 	}
@@ -30,7 +30,7 @@ func TestPromptsAreTheWaitingRequestsToPay(t *testing.T) {
 		t.Fatalf("prompts %+v", prompts)
 	}
 	p := prompts[0]
-	if p.Payee != "Boutique Mama" || p.Message != "Commande 7" || p.Amount != 2_500 || p.Currency != "XAF" ||
+	if p.Payee != "Acme" || p.Message != "Commande 7" || p.Amount != 2_500 || p.Currency != "XAF" ||
 		p.Phone != "242061234567" || p.Status != bank.Pending || !p.ExpiresAt.Equal(start.Add(5*time.Minute)) {
 		t.Fatalf("first prompt %+v", p)
 	}
@@ -116,7 +116,7 @@ func TestOnlyRequestsToPayCanBeAnswered(t *testing.T) {
 
 func TestDescribeGivesThePartnerAndReference(t *testing.T) {
 	e := setup(t)
-	m := e.partnerUser("Boutique Mama", "collection", "mtncongo")
+	m := e.partnerUser("Acme", "collection", "mtncongo")
 	if _, err := e.books.OpenCustomer(e.ctx, bank.MTN, "242061234567", "XAF", 5_000); err != nil {
 		t.Fatal(err)
 	}
@@ -127,7 +127,7 @@ func TestDescribeGivesThePartnerAndReference(t *testing.T) {
 	}
 	who, ref, err := e.svc.Describe(e.ctx, prompts[0].Transaction)
 	status := m.status(ref1)
-	if err != nil || who != "Boutique Mama" || ref == "" || status.body["financialTransactionId"] != ref {
+	if err != nil || who != "Acme" || ref == "" || status.body["financialTransactionId"] != ref {
 		t.Fatalf("describe: %q %q %v, status %v", who, ref, err, status.body)
 	}
 	if _, _, err := e.svc.Describe(e.ctx, bank.Transaction{ID: "nope"}); !errors.Is(err, bank.ErrNotFound) {
