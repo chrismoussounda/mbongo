@@ -308,9 +308,11 @@ func (b *Bank) RequestWith(ctx context.Context, r Request, also func(*sql.Tx, Tr
 		if err != nil {
 			return err
 		}
-		err = tx.QueryRowContext(ctx,
-			"SELECT id, currency FROM accounts WHERE operator = ? AND kind = 'customer' AND name = ?",
-			r.Operator, r.Phone).Scan(&t.CustomerID, &customerCurrency)
+		// A customer may hold wallets in several currencies: the one in the request's currency
+		// comes first, so a mismatch is only reported when there is none.
+		err = tx.QueryRowContext(ctx, `SELECT id, currency FROM accounts
+			WHERE operator = ? AND kind = 'customer' AND name = ? ORDER BY currency = ? DESC LIMIT 1`,
+			r.Operator, r.Phone, r.Currency).Scan(&t.CustomerID, &customerCurrency)
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrNoCustomer
 		}
