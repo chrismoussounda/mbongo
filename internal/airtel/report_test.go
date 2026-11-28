@@ -92,3 +92,52 @@ func TestAnExpiredTokenStillNamesItsApp(t *testing.T) {
 		t.Fatalf("call %+v", c)
 	}
 }
+
+func TestTheLedgerTellsOutcomesAndRefundTargets(t *testing.T) {
+	e := setup(t)
+	m := e.merchant(airtel.App{})
+	e.customer("055000001", 5000)
+	_ = m.post("/merchant/v1/payments/", collection("055000001", "order-1", 1000))
+	if got, err := e.svc.Outcome(e.ctx, m.app.ClientID, "order-1", "collection"); err != nil || got != report.Pending {
+		t.Fatalf("pending %q %v", got, err)
+	}
+	if err := e.svc.Approve(e.ctx, m.app.ClientID, "order-1"); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := e.svc.Outcome(e.ctx, m.app.ClientID, "order-1", "collection"); err != nil || got != report.Successful {
+		t.Fatalf("paid %q %v", got, err)
+	}
+	if got, err := e.svc.Outcome(e.ctx, m.app.ClientID, "order-1", "disbursement"); err != nil || got != "" {
+		t.Fatalf("other family %q %v", got, err)
+	}
+	moneyID, _ := m.get("/standard/v1/payments/order-1").transaction()["airtel_money_id"].(string)
+	target, found, err := e.svc.RefundTarget(e.ctx, m.app.ClientID, moneyID)
+	if err != nil || !found || target != (report.Target{Reference: "order-1", Operation: "collection", Amount: "1000", Currency: "XAF"}) {
+		t.Fatalf("target %+v %v %v", target, found, err)
+	}
+	if _, found, err := e.svc.RefundTarget(e.ctx, m.app.ClientID, "MP0"); err != nil || found {
+		t.Fatalf("unknown found: %v %v", found, err)
+	}
+
+	refund := m.post("/standard/v1/payments/refund", map[string]any{"transaction": map[string]any{"airtel_money_id": moneyID}})
+	refundID, _ := refund.transaction()["airtel_money_id"].(string)
+	_ = m.post("/merchant/v1/payments/", collection("055000001", "order-1", 1000))
+	calls, _ := e.recorded()
+	byOp := map[string]report.Call{}
+	for _, c := range calls {
+		byOp[c.Operation] = c
+	}
+	if c := byOp["refund"]; refundID == "" || c.Reference != refundID || c.RefundOf != moneyID {
+		t.Fatalf("refund %+v, id %q", c, refundID)
+	}
+	if got, err := e.svc.Outcome(e.ctx, m.app.ClientID, refundID, "refund"); err != nil || got != report.Successful {
+		t.Fatalf("refund outcome %q %v", got, err)
+	}
+	if target, found, err := e.svc.RefundTarget(e.ctx, m.app.ClientID, refundID); err != nil || !found ||
+		target.Operation != "refund" {
+		t.Fatalf("a refund as target %+v %v %v", target, found, err)
+	}
+	if c := byOp["collection"]; c.Outcome != report.Refused {
+		t.Fatalf("duplicate %+v", c)
+	}
+}

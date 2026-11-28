@@ -91,3 +91,24 @@ func TestAnExpiredTokenStillNamesItsUser(t *testing.T) {
 		t.Fatalf("call %+v", c)
 	}
 }
+
+func TestTheLedgerTellsOutcomesAndRefundTargets(t *testing.T) {
+	e := setup(t)
+	m := e.merchant(mtn.Sandbox)
+	payouts := e.partnerUser("acme", "disbursement", mtn.Sandbox)
+	_ = m.requestToPay(ref1, pay("46733123453", "10", "EUR"), nil)
+	if got, err := e.svc.Outcome(e.ctx, m.user, ref1, "requesttopay"); err != nil || got != report.Successful {
+		t.Fatalf("outcome %q %v", got, err)
+	}
+	if got, err := e.svc.Outcome(e.ctx, m.user, "6c8f4e5b-2d3e-4f9a-8b1c-2d3e4f5a6b7c", ""); err != nil || got != "" {
+		t.Fatalf("unknown %q %v", got, err)
+	}
+	target, found, err := e.svc.RefundTarget(e.ctx, payouts.user, ref1)
+	if err != nil || !found || target != (report.Target{Reference: ref1, Operation: "requesttopay", Amount: "10", Currency: "EUR"}) {
+		t.Fatalf("target %+v %v %v", target, found, err)
+	}
+	stranger := e.partnerUser("another partner", "disbursement", mtn.Sandbox)
+	if _, found, err := e.svc.RefundTarget(e.ctx, stranger.user, ref1); err != nil || found {
+		t.Fatalf("another partner found it: %v %v", found, err)
+	}
+}

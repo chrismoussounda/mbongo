@@ -2,7 +2,9 @@ package mtn
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"strings"
 
 	"github.com/chrismoussounda/mbongo/internal/report"
@@ -76,4 +78,43 @@ func seenAs(status string) string {
 		return report.Failed
 	}
 	return ""
+}
+
+// Outcome is what the API user would learn about one of its payments if it asked now.
+func (s *Service) Outcome(ctx context.Context, user, ref, _ string) (string, error) {
+	r, err := s.store.request(ctx, user, ref)
+	if errors.Is(err, ErrNotFound) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	u, err := s.store.apiUser(ctx, user)
+	if err != nil {
+		return "", err
+	}
+	op, err := operationNamed(r.Operation)
+	if err != nil {
+		return "", err
+	}
+	body, err := s.statusBody(ctx, u, op, r)
+	return seenAs(body.Status), err
+}
+
+// RefundTarget is the payment a reference names among the partner's API users, as a refund
+// may name a collection another of them took.
+func (s *Service) RefundTarget(ctx context.Context, user, ref string) (report.Target, bool, error) {
+	var t report.Target
+	err := s.store.db.QueryRowContext(ctx, `SELECT r.reference_id, r.operation, r.amount, r.currency
+		FROM mtn_requests r
+		JOIN mtn_api_users u ON u.id = r.api_user
+		JOIN mtn_subscriptions s ON s.key = u.subscription
+		JOIN mtn_api_users me ON me.id = ?
+		JOIN mtn_subscriptions mine ON mine.key = me.subscription
+		WHERE r.reference_id = ? AND s.partner = mine.partner AND u.environment = me.environment
+		ORDER BY r.api_user = me.id DESC LIMIT 1`, user, ref).Scan(&t.Reference, &t.Operation, &t.Amount, &t.Currency)
+	if errors.Is(err, sql.ErrNoRows) {
+		return t, false, nil
+	}
+	return t, err == nil, err
 }
