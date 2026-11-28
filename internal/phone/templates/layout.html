@@ -1,0 +1,41 @@
+{{define "head"}}<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{.}} · Mbongo phone</title>
+<link rel="stylesheet" href="/_mbongo/phone/static/phone.css">
+</head>
+<body>
+{{end}}
+
+{{define "foot"}}
+</body>
+</html>
+{{end}}
+
+{{define "index"}}{{template "head" "Phones"}}
+<main class="card" data-feed="/_mbongo/phone/events">
+  <h1>Phones</h1>
+  <p class="muted">A payment asked of any number pops up here and as a browser notification.
+    <button type="button" id="alerts" class="alerts" hidden>Turn on alerts</button></p>
+  <ul id="incoming" class="incoming"></ul>
+  {{with .Phones}}
+  <ul class="customers">
+    {{range .}}<li><a href="{{.URL}}">{{range $i, $s := .SIMs}}{{if $i}} + {{end}}{{$s}}{{end}}</a></li>{{end}}
+  </ul>
+  {{else}}
+  <p>No customers yet. Open one with <code>POST /_mbongo/customers</code> (admin API), or start Mbongo with
+    <code>MBONGO_AUTO_CUSTOMERS=true</code> so any number the API uses gets a phone.</p>
+  {{end}}
+</main>
+<script src="/_mbongo/phone/static/phone.js"></script>
+{{template "foot"}}{{end}}
+
+{{define "missing"}}{{template "head" "No such customer"}}
+<main class="card">
+  <h1>No such customer</h1>
+  <p>{{.Number}} has no {{.Operator}} wallet.</p>
+  <p><a href="/_mbongo/phone/">All phones</a></p>
+</main>
+{{template "foot"}}{{end}}
