@@ -11,6 +11,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -125,16 +126,17 @@ const timeLayout = "2006-01-02T15:04:05.000000000Z"
 
 // Recorder keeps the journal. A nil Recorder records nothing.
 type Recorder struct {
-	db    *sql.DB
-	clock clock.Clock
+	db     *sql.DB
+	clock  clock.Clock
+	logger *slog.Logger
 }
 
 // New opens the journal; the first run starts with it.
-func New(ctx context.Context, db *sql.DB, c clock.Clock) (*Recorder, error) {
+func New(ctx context.Context, db *sql.DB, c clock.Clock, logger *slog.Logger) (*Recorder, error) {
 	if err := migrate.Run(ctx, db, "report", []string{schema, byFingerprint}); err != nil {
 		return nil, err
 	}
-	rec := &Recorder{db: db, clock: c}
+	rec := &Recorder{db: db, clock: c, logger: logger}
 	_, err := db.ExecContext(ctx, `INSERT INTO report_runs (id, started_at)
 		SELECT 1, ? WHERE NOT EXISTS (SELECT 1 FROM report_runs)`, rec.now())
 	return rec, err
@@ -181,11 +183,15 @@ func (rec *Recorder) Wrap(operator, operation string, describe Describe, next ht
 			case !out.wrote:
 				status = http.StatusOK
 			}
-			c := describe(r.Context(), Exchange{Request: r, Body: body, Status: status, Answer: out.answer.Bytes()})
+			// The client may have hung up: its call still has to be told apart.
+			ctx := context.WithoutCancel(r.Context())
+			c := describe(ctx, Exchange{Request: r, Body: body, Status: status, Answer: out.answer.Bytes()})
 			c.Operator, c.Operation, c.Method, c.Path, c.Status, c.Fault = operator, operation, r.Method, r.URL.Path, status, n.fault
 			c.At, c.Millis = start, rec.clock.Now().Sub(start).Milliseconds()
 			// The client's answer is already out; a journal error must not change it.
-			_ = rec.addCall(context.WithoutCancel(r.Context()), c)
+			if err := rec.addCall(ctx, c); err != nil {
+				rec.logger.Error("report: call not recorded", "err", err, "path", c.Path)
+			}
 			if err != nil {
 				panic(err)
 			}

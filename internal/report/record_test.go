@@ -1,9 +1,11 @@
 package report_test
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -24,6 +26,11 @@ func setup(t *testing.T) (*report.Recorder, *clock.Manual) {
 
 func setupDB(t *testing.T) (*report.Recorder, *clock.Manual, *sql.DB) {
 	t.Helper()
+	return setupLogged(t, slog.New(slog.NewTextHandler(io.Discard, nil)))
+}
+
+func setupLogged(t *testing.T, logger *slog.Logger) (*report.Recorder, *clock.Manual, *sql.DB) {
+	t.Helper()
 	ctx := context.Background()
 	c := clock.NewManual(time.Date(2026, 11, 28, 9, 0, 0, 0, time.UTC))
 	books, err := bank.Open(ctx, filepath.Join(t.TempDir(), "r.db"), c)
@@ -31,7 +38,7 @@ func setupDB(t *testing.T) (*report.Recorder, *clock.Manual, *sql.DB) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = books.Close() })
-	rec, err := report.New(ctx, books.DB(), c)
+	rec, err := report.New(ctx, books.DB(), c, logger)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -230,5 +237,38 @@ func TestOnlyTheLastRunsAreKept(t *testing.T) {
 	}
 	if calls, _ := rec.Calls(ctx, 3); len(calls) != 1 {
 		t.Fatalf("run 3 lost its traffic: %+v", calls)
+	}
+}
+
+func TestAHungUpClientIsStillNamed(t *testing.T) {
+	rec, _ := setup(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	h := rec.Wrap("mtn", "requesttopay", func(ctx context.Context, _ report.Exchange) report.Call {
+		if ctx.Err() != nil {
+			return report.Call{}
+		}
+		return report.Call{Client: "app-1"}
+	}, http.HandlerFunc(func(http.ResponseWriter, *http.Request) { cancel() }))
+	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequestWithContext(ctx, http.MethodPost, "/pay", nil))
+	if got := onlyCall(t, rec, 1); got.Client != "app-1" || got.Status != 0 {
+		t.Fatalf("recorded %+v", got)
+	}
+}
+
+func TestACallNotRecordedIsLogged(t *testing.T) {
+	var logs bytes.Buffer
+	rec, _, db := setupLogged(t, slog.New(slog.NewTextHandler(&logs, nil)))
+	var seen report.Exchange
+	h := rec.Wrap("mtn", "balance", describe(&seen), http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusTeapot)
+	}))
+	if _, err := db.ExecContext(context.Background(), "DROP TABLE report_calls"); err != nil {
+		t.Fatal(err)
+	}
+	if w := serve(h, "x"); w.Code != http.StatusTeapot {
+		t.Fatalf("the answer changed: %d", w.Code)
+	}
+	if !strings.Contains(logs.String(), "call not recorded") {
+		t.Fatalf("logs: %s", logs.String())
 	}
 }

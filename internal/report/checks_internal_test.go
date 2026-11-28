@@ -3,6 +3,8 @@ package report
 import (
 	"context"
 	"fmt"
+	"io"
+	"log/slog"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -49,7 +51,7 @@ func newScript(t *testing.T) *script {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = books.Close() })
-	rec, err := New(ctx, books.DB(), c)
+	rec, err := New(ctx, books.DB(), c, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {
 		t.Fatal(err)
 	}

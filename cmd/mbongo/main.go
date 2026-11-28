@@ -58,7 +58,7 @@ func run(ctx context.Context, getenv func(string) string, out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	journal, err := report.New(ctx, books.DB(), books.Clock())
+	journal, err := report.New(ctx, books.DB(), books.Clock(), logger)
 	if err != nil {
 		return err
 	}

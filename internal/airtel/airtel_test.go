@@ -83,7 +83,7 @@ func setup(t *testing.T) *env {
 	if e.rules, err = faults.New(e.ctx, e.books.DB()); err != nil {
 		t.Fatal(err)
 	}
-	if e.journal, err = report.New(e.ctx, e.books.DB(), e.clock); err != nil {
+	if e.journal, err = report.New(e.ctx, e.books.DB(), e.clock, slog.New(slog.NewTextHandler(io.Discard, nil))); err != nil {
 		t.Fatal(err)
 	}
 	e.svc.WithFaults(e.rules).WithReport(e.journal)

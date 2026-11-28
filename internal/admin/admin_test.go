@@ -54,7 +54,7 @@ func setup(t *testing.T, token string) *env {
 	if err != nil {
 		t.Fatal(err)
 	}
-	journal, err := report.New(ctx, books.DB(), books.Clock())
+	journal, err := report.New(ctx, books.DB(), books.Clock(), logger)
 	if err != nil {
 		t.Fatal(err)
 	}
