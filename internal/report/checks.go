@@ -251,7 +251,7 @@ func (t *traffic) sort(ctx context.Context, ledger Ledger) error {
 
 type check func(ctx context.Context, t *traffic, ledger Ledger) ([]Finding, error)
 
-var checks = []check{doubleMoney, trust, refunds}
+var checks = []check{doubleMoney, trust, refunds, hygiene}
 
 func ids(calls ...Call) []int64 {
 	out := make([]int64, len(calls))

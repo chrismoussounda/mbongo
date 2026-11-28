@@ -2,6 +2,7 @@ package report
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -31,6 +32,8 @@ type script struct {
 	rec    *Recorder
 	clock  *clock.Manual
 	ledger fakeLedger
+	// gap is the time between two calls, a second unless set.
+	gap time.Duration
 }
 
 func newScript(t *testing.T) *script {
@@ -77,7 +80,10 @@ func (s *script) call(c Call) {
 	if err := s.rec.addCall(context.Background(), c); err != nil {
 		s.t.Fatal(err)
 	}
-	s.clock.Advance(time.Second)
+	if s.gap == 0 {
+		s.clock.Advance(time.Second)
+	}
+	s.clock.Advance(s.gap)
 }
 
 func (s *script) pay(ref, order, phone, amount string) {
@@ -90,8 +96,13 @@ func (s *script) status(ref, outcome string) {
 
 func (s *script) callback(ref, outcome string, httpStatus int) {
 	s.t.Helper()
+	s.callbackTaking(ref, outcome, httpStatus, 0)
+}
+
+func (s *script) callbackTaking(ref, outcome string, httpStatus int, took time.Duration) {
+	s.t.Helper()
 	if err := s.rec.Callback(context.Background(), Callback{Operator: "mtn", Client: "u1", Reference: ref,
-		Outcome: outcome, HTTPStatus: httpStatus, At: s.clock.Now()}); err != nil {
+		Outcome: outcome, HTTPStatus: httpStatus, At: s.clock.Now(), Millis: took.Milliseconds()}); err != nil {
 		s.t.Fatal(err)
 	}
 	s.clock.Advance(time.Second)
@@ -565,4 +576,148 @@ func TestARefusedRefundIsNoEarlierRefund(t *testing.T) {
 	s.ends("f2", Successful)
 	s.none("refund_while_pending")
 	s.none("over_refund")
+}
+
+func (s *script) token(fingerprint string) { s.call(Call{Operation: "token", Token: fingerprint}) }
+
+func TestATokenPerCall(t *testing.T) {
+	s := newScript(t)
+	for i := range 4 {
+		s.token(fmt.Sprintf("t%d", i))
+		s.call(Call{Operation: "balance", Token: fmt.Sprintf("t%d", i)})
+	}
+	if f := s.expect("token_per_call", Warning, ""); len(f.Calls) != 3 {
+		t.Fatalf("%+v", f)
+	}
+}
+
+func TestTokensKeptOrRenewedForAReasonAreFine(t *testing.T) {
+	t.Run("near their end", func(t *testing.T) {
+		s := newScript(t)
+		for i := range 5 {
+			s.token(fmt.Sprintf("t%d", i))
+			s.wait(50 * time.Minute)
+		}
+		s.none("token_per_call")
+	})
+	t.Run("after a 401", func(t *testing.T) {
+		s := newScript(t)
+		for i := range 5 {
+			s.token(fmt.Sprintf("t%d", i))
+			s.call(Call{Operation: "balance", Status: 401})
+		}
+		s.none("token_per_call")
+	})
+	t.Run("two early ones", func(t *testing.T) {
+		s := newScript(t)
+		for i := range 3 {
+			s.token(fmt.Sprintf("t%d", i))
+		}
+		s.none("token_per_call")
+	})
+	t.Run("airtel lives three minutes", func(t *testing.T) {
+		s := newScript(t)
+		for i := range 5 {
+			s.call(Call{Operator: "airtel", Operation: "token", Token: fmt.Sprintf("t%d", i)})
+			s.wait(100 * time.Second)
+		}
+		s.none("token_per_call")
+	})
+}
+
+func TestPollingTooFast(t *testing.T) {
+	s := newScript(t)
+	s.pay("r1", "o-1", "242061234567", "1000")
+	for range 3 {
+		s.status("r1", Pending)
+	}
+	s.ends("r1", Pending)
+	s.expect("polling_too_fast", Warning, "")
+}
+
+func TestPollingPatiently(t *testing.T) {
+	t.Run("spaced", func(t *testing.T) {
+		s := newScript(t)
+		s.pay("r1", "o-1", "242061234567", "1000")
+		for range 4 {
+			s.wait(20 * time.Second)
+			s.status("r1", Pending)
+		}
+		s.none("polling_too_fast")
+	})
+	t.Run("one quick retry", func(t *testing.T) {
+		s := newScript(t)
+		s.pay("r1", "o-1", "242061234567", "1000")
+		s.status("r1", Pending)
+		s.status("r1", Pending)
+		s.none("polling_too_fast")
+	})
+}
+
+func TestARateLimitIgnored(t *testing.T) {
+	s := newScript(t)
+	s.gap = 200 * time.Millisecond
+	s.call(Call{Operation: "balance", Status: 429})
+	s.call(Call{Operation: "balance"})
+	s.expect("rate_limit_ignored", Warning, "")
+}
+
+func TestARateLimitRespected(t *testing.T) {
+	s := newScript(t)
+	s.call(Call{Operation: "balance", Status: 429})
+	s.call(Call{Operation: "balance"})
+	s.none("rate_limit_ignored")
+}
+
+func TestACallbackEndpointFailing(t *testing.T) {
+	s := newScript(t)
+	s.pay("r1", "o-1", "242061234567", "1000")
+	s.status("r1", Successful)
+	s.ends("r1", Successful)
+	s.callback("r1", Successful, 200)
+	s.callback("r1", Successful, 500)
+	if f := s.expect("callback_failing", Error, "r1"); !contains(f.Message, "1 of 2") || !contains(f.Message, "HTTP 500") {
+		t.Fatalf("%q", f.Message)
+	}
+}
+
+func TestACallbackEndpointSlow(t *testing.T) {
+	s := newScript(t)
+	s.callbackTaking("r1", Successful, 200, 2*time.Second)
+	s.callbackTaking("r2", Successful, 200, 4500*time.Millisecond)
+	if f := s.expect("callback_slow", Warning, "r2"); !contains(f.Message, "4.5s") || !contains(f.Message, "1 callbacks") {
+		t.Fatalf("%q", f.Message)
+	}
+}
+
+func TestAnUnreachableCallbackEndpoint(t *testing.T) {
+	s := newScript(t)
+	if err := s.rec.Callback(context.Background(), Callback{Operator: "mtn", Client: "u1", Reference: "r1",
+		Outcome: Successful, Error: "connection refused", At: s.clock.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	if f := s.expect("callback_failing", Error, "r1"); !contains(f.Message, "connection refused") {
+		t.Fatalf("%q", f.Message)
+	}
+}
+
+func TestTheSlowestCallbackIsNamed(t *testing.T) {
+	s := newScript(t)
+	s.callbackTaking("r1", Successful, 200, 4500*time.Millisecond)
+	s.callbackTaking("r2", Successful, 200, 3500*time.Millisecond)
+	if f := s.expect("callback_slow", Warning, "r1"); !contains(f.Message, "2 callbacks") {
+		t.Fatalf("%q", f.Message)
+	}
+}
+
+func TestEarlyTokensCountAgainAfterARenewal(t *testing.T) {
+	s := newScript(t)
+	s.token("t0")
+	s.call(Call{Operation: "balance", Status: 401})
+	for i := 1; i <= 4; i++ {
+		s.token(fmt.Sprintf("t%d", i))
+	}
+	if f := s.expect("token_per_call", Warning, ""); len(f.Calls) != 3 {
+		t.Fatalf("%+v", f)
+	}
 }
