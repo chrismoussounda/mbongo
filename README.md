@@ -18,7 +18,8 @@ early. At the end, it tells you what your app got wrong.
 
 Early work. MTN's collection and payout APIs work, in their sandbox flavour and their Congo flavour, and
 so do Airtel Money Congo's collections, refunds, cash-in, cash-out and payouts, all on top of books where
-every movement adds up to zero. Tests can make either operator fail on purpose.
+every movement adds up to zero. Tests can make either operator fail on purpose, and each customer has
+a phone page to approve or refuse what a shop asks.
 
 | Step | What | State |
 | --- | --- | --- |
@@ -28,7 +29,7 @@ every movement adds up to zero. Tests can make either operator fail on purpose.
 | 4 | MTN payouts | done |
 | 5 | Airtel Money | done |
 | 6 | Failures on demand | done |
-| 7 | A phone page to approve or ignore payments | |
+| 7 | A phone page to approve or ignore payments | done |
 | 8 | A report on your integration | |
 | 9 | Checks against a public SDK, demo, write-up | |
 
@@ -50,6 +51,8 @@ docker run --rm -p 8080:8080 mbongo
 
 `PORT` or `MBONGO_ADDR` changes the address. `MBONGO_DB` is the SQLite file (`mbongo.db` by default,
 `/data/mbongo.db` in the image). `MBONGO_ADMIN_TOKEN` turns on the admin API below.
+`MBONGO_AUTO_CUSTOMERS=true` makes any MTN or Airtel Congo number your calls use a customer with
+100 000 XAF (`MBONGO_AUTO_BALANCE`), so you don't have to create them first.
 
 ## Use it in place of MTN
 
@@ -105,6 +108,15 @@ curl -X POST localhost:8080/_mbongo/airtel/<clientId>/fund -H "Authorization: Be
 
 Encrypt the PIN with the key from `GET /v1/rsa/encryption-keys`, as with Airtel. Phone numbers have no
 242: a number sent with it is an unknown customer.
+
+## Approve on the phone
+
+Instead of the approve calls above, open `/_mbongo/phone/` and pick a phone. Every customer has one,
+holding one or two SIMs (`"sameDeviceAs"` puts a new customer in another number's phone). Payments the
+shop asks for pop up on it: approve, refuse, or ignore and let them expire. An SMS arrives for each
+money move, and the page updates by itself.
+
+See [docs/phone.md](docs/phone.md).
 
 ## Make it fail
 
