@@ -83,7 +83,7 @@ func (s *Service) deliver(p payment, times int, fault string) {
 	for range times {
 		start := s.books.Clock().Now()
 		status, err := s.send(ctx, app.CallbackURL, raw)
-		cb := report.Callback{Operator: "airtel", Client: p.ClientID, Reference: p.ID, Outcome: seenAs(st.status),
+		cb := report.Callback{Operator: "airtel", Client: p.ClientID, Operation: p.Kind, Reference: p.ID, Outcome: seenAs(st.status),
 			HTTPStatus: status, Fault: fault, At: start, Millis: s.books.Clock().Now().Sub(start).Milliseconds()}
 		if err != nil {
 			cb.Error = err.Error()

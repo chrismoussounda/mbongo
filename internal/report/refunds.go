@@ -30,6 +30,7 @@ func refunds(ctx context.Context, t *traffic, ledger Ledger) ([]Finding, error) 
 		if !ok {
 			continue
 		}
+		turnedDown := c.Outcome == Refused || (c.Status >= 400 && c.Status < 500)
 		switch {
 		case target.Operation == "refund":
 			found = append(found, Finding{Check: "refund_of_refund", Group: Refunds, Severity: Error,
@@ -39,7 +40,7 @@ func refunds(ctx context.Context, t *traffic, ledger Ledger) ([]Finding, error) 
 			found = append(found, Finding{Check: "refund_of_payout", Group: Refunds, Severity: Error,
 				Reference: c.Reference, Calls: ids(c),
 				Message: fmt.Sprintf("A refund was asked for %s, a %s. Only a payment taken from a customer can be refunded.", c.RefundOf, target.Operation)})
-		default:
+		case !turnedDown:
 			found = append(found, againstEarlier(c, target, earlier[c.RefundOf])...)
 		}
 		if known && c.Reference != "" && p.final != "" {

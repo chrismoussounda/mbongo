@@ -56,6 +56,7 @@ type Callback struct {
 	Run        int64     `json:"run"`
 	Operator   string    `json:"operator"`
 	Client     string    `json:"client"`
+	Operation  string    `json:"operation"`
 	Reference  string    `json:"reference"`
 	Outcome    string    `json:"outcome"`
 	HTTPStatus int       `json:"httpStatus"`
@@ -108,6 +109,7 @@ CREATE TABLE report_callbacks (
     run         INTEGER NOT NULL REFERENCES report_runs (id),
     operator    TEXT NOT NULL,
     client      TEXT NOT NULL,
+    operation   TEXT NOT NULL,
     reference   TEXT NOT NULL,
     outcome     TEXT NOT NULL,
     http_status INTEGER NOT NULL,
@@ -206,9 +208,9 @@ func (rec *Recorder) Callback(ctx context.Context, cb Callback) error {
 		return nil
 	}
 	_, err := rec.db.ExecContext(ctx, `INSERT INTO report_callbacks
-		(run, operator, client, reference, outcome, http_status, error, fault, at, ms)
-		VALUES ((SELECT MAX(id) FROM report_runs), ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		cb.Operator, cb.Client, cb.Reference, cb.Outcome, cb.HTTPStatus, cb.Error, cb.Fault,
+		(run, operator, client, operation, reference, outcome, http_status, error, fault, at, ms)
+		VALUES ((SELECT MAX(id) FROM report_runs), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		cb.Operator, cb.Client, cb.Operation, cb.Reference, cb.Outcome, cb.HTTPStatus, cb.Error, cb.Fault,
 		cb.At.UTC().Format(timeLayout), cb.Millis)
 	return err
 }
@@ -359,7 +361,7 @@ func (rec *Recorder) Callbacks(ctx context.Context, run int64) ([]Callback, erro
 	if err := rec.checkRun(ctx, run); err != nil {
 		return nil, err
 	}
-	rows, err := rec.db.QueryContext(ctx, `SELECT id, run, operator, client, reference, outcome, http_status,
+	rows, err := rec.db.QueryContext(ctx, `SELECT id, run, operator, client, operation, reference, outcome, http_status,
 		error, fault, at, ms FROM report_callbacks WHERE run = ? ORDER BY id`, run)
 	if err != nil {
 		return nil, err
@@ -371,7 +373,7 @@ func (rec *Recorder) Callbacks(ctx context.Context, run int64) ([]Callback, erro
 			cb Callback
 			at string
 		)
-		if err := rows.Scan(&cb.ID, &cb.Run, &cb.Operator, &cb.Client, &cb.Reference, &cb.Outcome,
+		if err := rows.Scan(&cb.ID, &cb.Run, &cb.Operator, &cb.Client, &cb.Operation, &cb.Reference, &cb.Outcome,
 			&cb.HTTPStatus, &cb.Error, &cb.Fault, &at, &cb.Millis); err != nil {
 			return nil, err
 		}

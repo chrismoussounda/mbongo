@@ -68,7 +68,7 @@ func (s *Service) deliver(req request, times int, fault string) {
 	for range times {
 		start := s.books.Clock().Now()
 		status, err := s.send(ctx, req.CallbackURL, raw)
-		cb := report.Callback{Operator: "mtn", Client: req.APIUser, Reference: req.ReferenceID,
+		cb := report.Callback{Operator: "mtn", Client: req.APIUser, Operation: fresh.Operation, Reference: req.ReferenceID,
 			Outcome: seenAs(body.Status), HTTPStatus: status, Fault: fault, At: start,
 			Millis: s.books.Clock().Now().Sub(start).Milliseconds()}
 		if err != nil {

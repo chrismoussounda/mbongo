@@ -66,14 +66,14 @@ func pollingTooFast(t *traffic) (Finding, bool) {
 		refs  []string
 	)
 	for _, p := range t.order {
-		n := 0
+		var mine []Call
 		for i := 1; i < len(p.statuses); i++ {
 			if p.statuses[i].At.Sub(p.statuses[i-1].At) < quickPoll {
-				quick = append(quick, p.statuses[i])
-				n++
+				mine = append(mine, p.statuses[i])
 			}
 		}
-		if n >= 2 {
+		if len(mine) >= 2 {
+			quick = append(quick, mine...)
 			refs = append(refs, p.reference)
 		}
 	}

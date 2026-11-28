@@ -50,7 +50,7 @@ func TestTheReportSeesCallsAndCallbacks(t *testing.T) {
 	if st.Operation != "status" || st.Reference != ref1 || st.Outcome != report.Successful || st.Client != m.user {
 		t.Fatalf("status %+v", st)
 	}
-	if len(cbs) != 1 || cbs[0].Client != m.user || cbs[0].Reference != ref1 || cbs[0].Outcome != report.Successful ||
+	if len(cbs) != 1 || cbs[0].Client != m.user || cbs[0].Reference != ref1 || cbs[0].Operation != "requesttopay" || cbs[0].Outcome != report.Successful ||
 		cbs[0].HTTPStatus != http.StatusInternalServerError || cbs[0].Fault != "" {
 		t.Fatalf("callbacks %+v", cbs)
 	}
@@ -121,5 +121,18 @@ func TestTheLedgerTellsOutcomesAndRefundTargets(t *testing.T) {
 	stranger := e.partnerUser("another partner", "disbursement", mtn.Sandbox)
 	if _, found, err := e.svc.RefundTarget(e.ctx, stranger.user, ref1); err != nil || found {
 		t.Fatalf("another partner found it: %v %v", found, err)
+	}
+}
+
+func TestARefusedTokenNamesNoUser(t *testing.T) {
+	e := setup(t)
+	m := e.merchant(mtn.Sandbox)
+	m.key = "wrong"
+	if a := m.token(); a.status == 200 {
+		t.Fatalf("token %d", a.status)
+	}
+	calls, _ := e.recorded()
+	if c := calls[len(calls)-1]; c.Operation != "token" || c.Client != "" || c.Token != "" {
+		t.Fatalf("refused token %+v", c)
 	}
 }

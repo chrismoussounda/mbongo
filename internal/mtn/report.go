@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"net/http"
 	"strings"
 
 	"github.com/chrismoussounda/mbongo/internal/report"
@@ -22,6 +23,9 @@ func (s *Service) describe(ctx context.Context, e report.Exchange) report.Call {
 	var c report.Call
 	switch {
 	case strings.HasSuffix(r.URL.Path, "/token/"):
+		if e.Status != http.StatusOK {
+			return c
+		}
 		c.Client, _, _ = r.BasicAuth()
 		var answer struct {
 			AccessToken string `json:"access_token"`

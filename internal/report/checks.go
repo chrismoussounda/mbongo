@@ -97,13 +97,23 @@ type payment struct {
 
 func (p *payment) first() Call { return p.creations[0] }
 
-// learned is what the client knew of the payment at a time: the last outcome a status call or
-// a delivered callback told it.
+// learned is what the client knew of the payment at a time: the last outcome the answer that
+// started it, a status call or a delivered callback told it.
 func (p *payment) learned(at time.Time) string {
 	var (
 		known string
 		when  time.Time
 	)
+	if first := p.first(); first.Status == 200 && !first.At.After(at) {
+		switch first.Outcome {
+		case Pending, Successful, Failed:
+			known, when = first.Outcome, first.At
+		case Refused:
+			if p.final != "" {
+				known, when = Failed, first.At
+			}
+		}
+	}
 	for _, c := range p.statuses {
 		if c.Status == 200 && c.Outcome != "" && !c.At.After(at) && !c.At.Before(when) {
 			known, when = c.Outcome, c.At
@@ -237,11 +247,8 @@ func (t *traffic) sort(ctx context.Context, ledger Ledger) error {
 		}
 	}
 	for _, cb := range t.callbacks {
-		for _, p := range t.order {
-			if p.reference == cb.Reference {
-				p.callbacks = append(p.callbacks, cb)
-				break
-			}
+		if p, ok := t.payments[keyOf(t.operator, Call{Operation: cb.Operation, Reference: cb.Reference})]; ok {
+			p.callbacks = append(p.callbacks, cb)
 		}
 	}
 	if ledger == nil {

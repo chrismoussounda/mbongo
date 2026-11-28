@@ -30,7 +30,9 @@ func (s *Service) describe(ctx context.Context, e report.Exchange) report.Call {
 		}
 		_ = json.Unmarshal(e.Body, &in)
 		_ = json.Unmarshal(e.Answer, &answer)
-		c.Client, c.Token = in.ClientID, report.Fingerprint(answer.AccessToken)
+		if e.Status == http.StatusOK {
+			c.Client, c.Token = in.ClientID, report.Fingerprint(answer.AccessToken)
+		}
 		return c
 	}
 	token, _ := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
@@ -42,6 +44,7 @@ func (s *Service) describe(ctx context.Context, e report.Exchange) report.Call {
 	}
 	var answer struct {
 		Data struct {
+			Status      string `json:"status"`
 			Transaction struct {
 				Status        string `json:"status"`
 				AirtelMoneyID string `json:"airtel_money_id"`
@@ -52,29 +55,49 @@ func (s *Service) describe(ctx context.Context, e report.Exchange) report.Call {
 		} `json:"status"`
 	}
 	_ = json.Unmarshal(e.Answer, &answer)
-	c.Outcome = seenAs(answer.Data.Transaction.Status)
+	status := answer.Data.Transaction.Status
+	if status == "" {
+		status = answer.Data.Status
+	}
 	if r.Method == http.MethodGet {
-		c.Reference = r.PathValue("id")
+		c.Reference, c.Outcome = r.PathValue("id"), seenAs(status)
 		return c
 	}
 	var p paymentBody
 	if json.Unmarshal(e.Body, &p) != nil {
 		return c
 	}
-	c.Reference, c.Order, c.Amount = p.Transaction.ID, p.Reference, string(p.Transaction.Amount)
+	// The body's reference is the text the customer reads, not an order number, so Order stays empty.
+	c.Reference, c.Amount = p.Transaction.ID, string(p.Transaction.Amount)
 	c.Currency = r.Header.Get("X-Currency")
 	c.Phone = p.Subscriber.MSISDN
 	if c.Phone == "" {
 		c.Phone = p.Payee.MSISDN
 	}
 	if strings.HasSuffix(r.URL.Path, "/refund") {
-		// A refund is known by its own Airtel Money ID, the one its answer gives.
+		// A refund is known by its own Airtel Money ID, the one its answer gives; without an
+		// answer, by the newest refund of that payment.
 		c.RefundOf, c.Reference = p.Transaction.AirtelMoneyID, answer.Data.Transaction.AirtelMoneyID
+		if c.Reference == "" && (e.Status == 0 || e.Status >= http.StatusInternalServerError) {
+			c.Reference = s.store.newestRefund(ctx, c.Client, c.RefundOf)
+		}
 	}
-	if e.Status == http.StatusOK && answer.Status.Success != nil && !*answer.Status.Success {
-		c.Outcome = report.Refused
+	if e.Status == http.StatusOK && answer.Status.Success != nil {
+		c.Outcome = answered(r.URL.Path, *answer.Status.Success, status)
 	}
 	return c
+}
+
+// answered is what the answer to a new payment tells the app: a collection waits for the
+// customer, cash-out, cash-in, payouts and refunds settle at once unless still in progress.
+func answered(path string, success bool, status string) string {
+	switch {
+	case !success:
+		return report.Refused
+	case strings.HasPrefix(path, "/merchant/"), status == "TIP", status == "TA":
+		return report.Pending
+	}
+	return report.Successful
 }
 
 // Outcome is what the app would learn about one of its payments if it asked now.

@@ -737,3 +737,96 @@ func TestDurationsReadLikePeopleSayThem(t *testing.T) {
 		}
 	}
 }
+
+func TestAnAnswerThatSettlesAtOnceIsLearned(t *testing.T) {
+	t.Run("paid", func(t *testing.T) {
+		s := newScript(t)
+		s.call(Call{Operator: "airtel", Operation: "disbursement", Reference: "d1", Phone: "055000001", Amount: "500",
+			Status: 200, Outcome: Successful})
+		s.ends("d1", Successful)
+		s.none("money_unconfirmed")
+	})
+	t.Run("refused after it was made", func(t *testing.T) {
+		s := newScript(t)
+		s.call(Call{Operator: "airtel", Operation: "disbursement", Reference: "d1", Status: 200, Outcome: Refused})
+		s.ends("d1", Failed)
+		s.none("failure_unseen")
+	})
+	t.Run("a duplicate refused is no outcome", func(t *testing.T) {
+		s := newScript(t)
+		s.call(Call{Operator: "airtel", Operation: "collection", Reference: "c1", Status: 200, Outcome: Pending})
+		s.call(Call{Operator: "airtel", Operation: "collection", Reference: "c1", Status: 200, Outcome: Refused})
+		s.ends("c1", Successful)
+		s.expect("money_unconfirmed", Error, "c1")
+	})
+	t.Run("a duplicate refused says nothing of a failure", func(t *testing.T) {
+		s := newScript(t)
+		s.call(Call{Operator: "airtel", Operation: "collection", Reference: "c1", Status: 200, Outcome: Pending})
+		s.call(Call{Operator: "airtel", Operation: "collection", Reference: "c1", Status: 200, Outcome: Refused})
+		s.ends("c1", Failed)
+		s.expect("failure_unseen", Warning, "c1")
+	})
+	t.Run("pending is not final", func(t *testing.T) {
+		s := newScript(t)
+		s.call(Call{Operator: "airtel", Operation: "collection", Reference: "c1", Status: 200, Outcome: Pending})
+		s.ends("c1", Successful)
+		s.expect("money_unconfirmed", Error, "c1")
+	})
+}
+
+func TestARefundTurnedDownMovesNothing(t *testing.T) {
+	for name, c := range map[string]Call{
+		"refused": {Status: 200, Outcome: Refused},
+		"4xx":     {Status: 409},
+	} {
+		t.Run(name, func(t *testing.T) {
+			s := newScript(t)
+			s.paid()
+			s.refund("f1", "r1", "1000")
+			s.ends("f1", Successful)
+			s.wait(time.Second)
+			c.Operation, c.Reference, c.RefundOf, c.Amount = "refund", "f2", "r1", "1000"
+			s.call(c)
+			s.none("over_refund")
+			s.none("refund_while_pending")
+		})
+	}
+}
+
+func TestPollingEvidenceIsOnlyTheFlaggedPayment(t *testing.T) {
+	s := newScript(t)
+	s.pay("a", "o-1", "242061234567", "1000")
+	s.pay("b", "o-2", "242061234567", "2000")
+	for range 3 {
+		s.status("a", Pending)
+	}
+	s.status("b", Pending)
+	s.status("b", Pending)
+	f := s.expect("polling_too_fast", Warning, "")
+	if len(f.Calls) != 2 {
+		t.Fatalf("%+v", f)
+	}
+}
+
+func TestACallbackGoesToItsOwnFamily(t *testing.T) {
+	s := newScript(t)
+	s.call(Call{Operator: "airtel", Operation: "disbursement", Reference: "42", Status: 200, Outcome: Successful})
+	s.ends("42", Successful)
+	s.call(Call{Operator: "airtel", Operation: "collection", Reference: "42", Status: 200, Outcome: Pending})
+	if err := s.rec.Callback(t.Context(), Callback{Operator: "airtel", Client: "u1", Operation: "collection",
+		Reference: "42", Outcome: Successful, HTTPStatus: 200, At: s.clock.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	reports, err := s.rec.Build(t.Context(), 1, map[string]Ledger{"airtel": s.ledger})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range reports[0].Findings {
+		if f.Check == "money_unconfirmed" {
+			t.Fatalf("the collection's callback went elsewhere: %+v", f)
+		}
+	}
+	if got := s.found("callback_trusted"); len(got) != 1 {
+		t.Fatalf("callback_trusted: %+v", got)
+	}
+}

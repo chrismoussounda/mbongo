@@ -35,7 +35,7 @@ will cause one sooner or later.
 
 | Check | Severity | When |
 | --- | --- | --- |
-| `order_paid_twice` | error | Two payments with the same order (`externalId`, Airtel `reference`) both succeeded |
+| `order_paid_twice` | error | Two MTN payments with the same `externalId` both succeeded. Airtel's `reference` is the text the customer reads, not an order number, so Airtel payments are matched by number and amount instead |
 | `payout_twice` | warning | Two equal payouts to one number within 10 minutes both succeeded |
 | `lost_answer_new_reference` | error | A payment got no answer or a 5xx, then the same order (or number and amount) was sent under a new reference without a status call first. Retry with the same reference, or ask the status |
 | `failed_retried_same_reference` | warning | A payment the app knew had failed was sent again with its old reference; a new attempt needs a new one |
