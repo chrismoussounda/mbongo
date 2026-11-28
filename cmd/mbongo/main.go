@@ -87,7 +87,7 @@ func run(ctx context.Context, getenv func(string) string, out io.Writer) error {
 		defer close(swept)
 		janitor.Run(sweepCtx, time.Second, func(err error) { logger.Error("housekeeping", "err", err) },
 			func(ctx context.Context) error { _, err := books.ExpireDue(ctx); return err },
-			momo.PurgeTokens, airtelMoney.PurgeTokens)
+			momo.PurgeTokens, airtelMoney.PurgeTokens, journal.Prune)
 	}()
 	defer func() { stopSweep(); <-swept }()
 

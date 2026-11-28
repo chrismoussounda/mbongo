@@ -256,6 +256,29 @@ func (rec *Recorder) NewRun(ctx context.Context) (Run, error) {
 	return Run{ID: id, Started: now}, err
 }
 
+// KeptRuns is how many runs Prune keeps, the current one included.
+const KeptRuns = 20
+
+// Prune forgets the runs older than the last KeptRuns, with their traffic.
+func (rec *Recorder) Prune(ctx context.Context) error {
+	tx, err := rec.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	const old = "(SELECT MAX(id) FROM report_runs) - ?"
+	for _, q := range []string{
+		"DELETE FROM report_calls WHERE run <= " + old,
+		"DELETE FROM report_callbacks WHERE run <= " + old,
+		"DELETE FROM report_runs WHERE id <= " + old,
+	} {
+		if _, err := tx.ExecContext(ctx, q, KeptRuns); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
 // Runs lists the runs, newest first.
 func (rec *Recorder) Runs(ctx context.Context) ([]Run, error) {
 	rows, err := rec.db.QueryContext(ctx, "SELECT id, started_at FROM report_runs ORDER BY id DESC")

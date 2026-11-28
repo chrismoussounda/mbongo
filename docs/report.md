@@ -22,7 +22,8 @@ a `message`, and the ids of the `calls` behind it.
 
 A run is a stretch of traffic. The first one starts with Mbongo and goes on across restarts.
 `POST /_mbongo/report/runs` starts the next one; what follows is recorded in it, and older runs stay
-readable. `GET /_mbongo/report/runs` lists them. Start a run before each test suite so earlier
+readable. `GET /_mbongo/report/runs` lists them. Mbongo keeps the last 20 runs and forgets older ones
+with their traffic. Start a run before each test suite so earlier
 experiments don't show up in its report.
 
 ## Checks

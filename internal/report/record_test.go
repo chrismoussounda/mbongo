@@ -2,6 +2,7 @@ package report_test
 
 import (
 	"context"
+	"database/sql"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -17,6 +18,12 @@ import (
 
 func setup(t *testing.T) (*report.Recorder, *clock.Manual) {
 	t.Helper()
+	rec, c, _ := setupDB(t)
+	return rec, c
+}
+
+func setupDB(t *testing.T) (*report.Recorder, *clock.Manual, *sql.DB) {
+	t.Helper()
 	ctx := context.Background()
 	c := clock.NewManual(time.Date(2026, 11, 28, 9, 0, 0, 0, time.UTC))
 	books, err := bank.Open(ctx, filepath.Join(t.TempDir(), "r.db"), c)
@@ -28,7 +35,7 @@ func setup(t *testing.T) (*report.Recorder, *clock.Manual) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return rec, c
+	return rec, c, books.DB()
 }
 
 // describe says who called from a header and copies the body and answer it was given.
@@ -189,5 +196,39 @@ func TestNilRecorderRecordsNothing(t *testing.T) {
 	}
 	if err := rec.Callback(context.Background(), report.Callback{}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestOnlyTheLastRunsAreKept(t *testing.T) {
+	rec, c, db := setupDB(t)
+	ctx := context.Background()
+	var seen report.Exchange
+	h := rec.Wrap("mtn", "status", describe(&seen), http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	for range report.KeptRuns + 1 {
+		serve(h, "x")
+		if err := rec.Callback(ctx, report.Callback{Operator: "mtn", Client: "app-1", At: c.Now()}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := rec.NewRun(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := rec.Prune(ctx); err != nil {
+		t.Fatal(err)
+	}
+	runs, _ := rec.Runs(ctx)
+	if len(runs) != report.KeptRuns || runs[0].ID != report.KeptRuns+2 || runs[len(runs)-1].ID != 3 {
+		t.Fatalf("runs %d, from %d to %d", len(runs), runs[len(runs)-1].ID, runs[0].ID)
+	}
+	if _, err := rec.Calls(ctx, 2); err != report.ErrNoRun { //nolint:errorlint // returned as is
+		t.Fatalf("run 2: %v", err)
+	}
+	var left int
+	if err := db.QueryRowContext(ctx, `SELECT (SELECT COUNT(*) FROM report_calls WHERE run < 3)
+		+ (SELECT COUNT(*) FROM report_callbacks WHERE run < 3)`).Scan(&left); err != nil || left != 0 {
+		t.Fatalf("traffic of pruned runs: %d %v", left, err)
+	}
+	if calls, _ := rec.Calls(ctx, 3); len(calls) != 1 {
+		t.Fatalf("run 3 lost its traffic: %+v", calls)
 	}
 }
