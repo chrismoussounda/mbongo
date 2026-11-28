@@ -97,6 +97,8 @@ func run(ctx context.Context, getenv func(string) string, out io.Writer) error {
 			admin.Routes(mux, getenv("MBONGO_ADMIN_TOKEN"), books, momo, airtelMoney, rules, phones, journal, logger)
 		}, func(mux *http.ServeMux) {
 			phones.Routes(ctx, mux)
+		}, func(mux *http.ServeMux) {
+			journal.Routes(mux, map[string]report.Ledger{"mtn": momo, "airtel": airtelMoney}, logger)
 		}),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
