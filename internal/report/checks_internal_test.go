@@ -3,6 +3,7 @@ package report
 import (
 	"context"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -319,5 +320,116 @@ func TestCallsFromNoKnownClientAreLeftOut(t *testing.T) {
 	}
 	if r := s.report(); r.Calls != 1 {
 		t.Fatalf("%+v", r)
+	}
+}
+
+func TestACallbackTrustedWithoutAStatusCall(t *testing.T) {
+	s := newScript(t)
+	s.pay("r1", "o-1", "242061234567", "1000")
+	s.status("r1", Pending)
+	s.callback("r1", Successful, 200)
+	s.ends("r1", Successful)
+	s.expect("callback_trusted", Warning, "r1")
+	s.none("money_unconfirmed")
+}
+
+func TestACallbackCheckedOrAlreadyKnownIsFine(t *testing.T) {
+	t.Run("checked after", func(t *testing.T) {
+		s := newScript(t)
+		s.pay("r1", "o-1", "242061234567", "1000")
+		s.callback("r1", Successful, 200)
+		s.status("r1", Successful)
+		s.ends("r1", Successful)
+		s.none("callback_trusted")
+	})
+	t.Run("known before", func(t *testing.T) {
+		s := newScript(t)
+		s.pay("r1", "o-1", "242061234567", "1000")
+		s.status("r1", Successful)
+		s.callback("r1", Successful, 200)
+		s.ends("r1", Successful)
+		s.none("callback_trusted")
+	})
+	t.Run("a failure", func(t *testing.T) {
+		s := newScript(t)
+		s.pay("r1", "o-1", "242061234567", "1000")
+		s.callback("r1", Failed, 200)
+		s.ends("r1", Failed)
+		s.none("callback_trusted")
+		s.none("failure_unseen")
+	})
+	t.Run("not delivered", func(t *testing.T) {
+		s := newScript(t)
+		s.pay("r1", "o-1", "242061234567", "1000")
+		s.callback("r1", Successful, 502)
+		s.ends("r1", Successful)
+		s.none("callback_trusted")
+		s.expect("money_unconfirmed", Error, "r1")
+	})
+}
+
+func TestMoneyTakenNeverConfirmed(t *testing.T) {
+	t.Run("never asked", func(t *testing.T) {
+		s := newScript(t)
+		s.pay("r1", "o-1", "242061234567", "1000")
+		s.ends("r1", Successful)
+		f := s.expect("money_unconfirmed", Error, "r1")
+		if f.Group != Trust {
+			t.Fatalf("%+v", f)
+		}
+	})
+	t.Run("gave up while pending", func(t *testing.T) {
+		s := newScript(t)
+		s.pay("r1", "o-1", "242061234567", "1000")
+		s.status("r1", Pending)
+		s.wait(time.Minute)
+		s.status("r1", Pending)
+		s.ends("r1", Successful)
+		f := s.expect("money_unconfirmed", Error, "r1")
+		if want := "stopped asking after 1m2s"; !contains(f.Message, want) {
+			t.Fatalf("%q lacks %q", f.Message, want)
+		}
+	})
+	t.Run("still pending", func(t *testing.T) {
+		s := newScript(t)
+		s.pay("r1", "o-1", "242061234567", "1000")
+		s.ends("r1", Pending)
+		s.none("money_unconfirmed")
+		s.none("failure_unseen")
+	})
+	t.Run("refused at once", func(t *testing.T) {
+		s := newScript(t)
+		s.call(Call{Operation: "requesttopay", Reference: "r1", Status: 400})
+		s.none("money_unconfirmed")
+		s.none("failure_unseen")
+	})
+}
+
+func TestAFailureNeverSeen(t *testing.T) {
+	s := newScript(t)
+	s.call(Call{Operation: "transfer", Reference: "p1", Phone: "242061234567", Amount: "5000"})
+	s.ends("p1", Failed)
+	s.expect("failure_unseen", Warning, "p1")
+	s.none("money_unconfirmed")
+}
+
+func contains(s, sub string) bool { return strings.Contains(s, sub) }
+
+func TestACheckAfterTheCallbackCountsWhateverItSaw(t *testing.T) {
+	s := newScript(t)
+	s.pay("r1", "o-1", "242061234567", "1000")
+	s.callback("r1", Successful, 200)
+	s.status("r1", Pending)
+	s.ends("r1", Successful)
+	s.none("callback_trusted")
+}
+
+func TestARefusedStatusCallIsNoCheck(t *testing.T) {
+	s := newScript(t)
+	s.pay("r1", "o-1", "242061234567", "1000")
+	s.call(Call{Operation: "status", Reference: "r1", Status: 401})
+	s.ends("r1", Successful)
+	if f := s.expect("money_unconfirmed", Error, "r1"); !contains(f.Message, "never asked") {
+		t.Fatalf("%q", f.Message)
 	}
 }
