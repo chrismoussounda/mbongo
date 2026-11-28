@@ -1,8 +1,9 @@
 // Package admin is Mbongo's own API, for what an operator does by hand: issuing keys,
-// opening wallets, and the payer's yes or no until the phone page exists.
+// opening wallets, and the payer's yes or no for tests that skip the phone page.
 package admin
 
 import (
+	"context"
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
@@ -15,24 +16,32 @@ import (
 	"github.com/chrismoussounda/mbongo/internal/faults"
 	"github.com/chrismoussounda/mbongo/internal/money"
 	"github.com/chrismoussounda/mbongo/internal/mtn"
+	"github.com/chrismoussounda/mbongo/internal/phone"
 )
 
+// Devices opens a new customer with the SIM in the phone of another number.
+type Devices interface {
+	OpenInPhoneOf(ctx context.Context, op bank.Operator, newNumber, currency string, balance int64,
+		number string) (bank.Account, error)
+}
+
 type handler struct {
-	token  string
-	books  *bank.Bank
-	mtn    *mtn.Service
-	airtel *airtel.Service
-	faults *faults.Injector
-	logger *slog.Logger
+	token   string
+	devices Devices
+	books   *bank.Bank
+	mtn     *mtn.Service
+	airtel  *airtel.Service
+	faults  *faults.Injector
+	logger  *slog.Logger
 }
 
 // Routes does nothing without a token, so the admin API is off unless asked for.
 func Routes(mux *http.ServeMux, token string, books *bank.Bank, m *mtn.Service, a *airtel.Service,
-	f *faults.Injector, logger *slog.Logger) {
+	f *faults.Injector, d Devices, logger *slog.Logger) {
 	if token == "" {
 		return
 	}
-	h := &handler{token: token, books: books, mtn: m, airtel: a, faults: f, logger: logger}
+	h := &handler{token: token, books: books, mtn: m, airtel: a, faults: f, devices: d, logger: logger}
 	mux.HandleFunc("POST /_mbongo/mtn/subscriptions", h.guard(h.subscription))
 	mux.HandleFunc("POST /_mbongo/mtn/api-users", h.guard(h.apiUser))
 	mux.HandleFunc("POST /_mbongo/customers", h.guard(h.customer))
@@ -110,6 +119,8 @@ func (h *handler) customer(w http.ResponseWriter, r *http.Request) {
 		Phone    string `json:"phone"`
 		Currency string `json:"currency"`
 		Balance  string `json:"balance"`
+		// SameDeviceAs is another customer's number: the new SIM goes into that number's phone.
+		SameDeviceAs string `json:"sameDeviceAs"`
 	}
 	if !read(w, r, &in) {
 		return
@@ -126,8 +137,24 @@ func (h *handler) customer(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	a, err := h.books.OpenCustomer(r.Context(), bank.Operator(in.Operator), in.Phone, in.Currency, balance)
+	op := bank.Operator(in.Operator)
+	var a bank.Account
+	var err error
+	if in.SameDeviceAs != "" {
+		a, err = h.devices.OpenInPhoneOf(r.Context(), op, in.Phone, in.Currency, balance, in.SameDeviceAs)
+	} else {
+		a, err = h.books.OpenCustomer(r.Context(), op, in.Phone, in.Currency, balance)
+	}
 	switch {
+	case errors.Is(err, phone.ErrUnknownNumber):
+		h.refuse(w, "sameDeviceAs must be the number of an existing customer")
+		return
+	case errors.Is(err, phone.ErrAmbiguous):
+		h.refuse(w, "sameDeviceAs is a customer at both operators")
+		return
+	case errors.Is(err, phone.ErrFull):
+		reply(w, http.StatusConflict, map[string]string{"error": "that phone already holds two SIMs"})
+		return
 	case errors.Is(err, bank.ErrExists):
 		reply(w, http.StatusConflict, map[string]string{"error": "this customer already exists"})
 		return
@@ -141,9 +168,12 @@ func (h *handler) customer(w http.ResponseWriter, r *http.Request) {
 		h.internal(w, err)
 		return
 	}
-	formatted, _ := money.Format(a.Balance, a.Currency)
-	reply(w, http.StatusCreated, map[string]string{"operator": in.Operator, "phone": a.Name,
-		"currency": a.Currency, "balance": formatted})
+	out := map[string]string{"operator": in.Operator, "phone": a.Name, "currency": a.Currency}
+	out["balance"], _ = money.Format(a.Balance, a.Currency)
+	if in.SameDeviceAs != "" {
+		out["sameDeviceAs"] = in.SameDeviceAs
+	}
+	reply(w, http.StatusCreated, out)
 }
 
 func (h *handler) fund(w http.ResponseWriter, r *http.Request) {

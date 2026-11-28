@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -19,7 +20,9 @@ import (
 	"github.com/chrismoussounda/mbongo/internal/clock"
 	"github.com/chrismoussounda/mbongo/internal/faults"
 	"github.com/chrismoussounda/mbongo/internal/janitor"
+	"github.com/chrismoussounda/mbongo/internal/money"
 	"github.com/chrismoussounda/mbongo/internal/mtn"
+	"github.com/chrismoussounda/mbongo/internal/phone"
 	"github.com/chrismoussounda/mbongo/internal/server"
 )
 
@@ -46,6 +49,9 @@ func run(ctx context.Context, getenv func(string) string, out io.Writer) error {
 		return fmt.Errorf("open %s: %w", path, err)
 	}
 	defer func() { _ = books.Close() }()
+	if err := autoCustomers(getenv, books); err != nil {
+		return err
+	}
 
 	rules, err := faults.New(ctx, books.DB())
 	if err != nil {
@@ -65,6 +71,11 @@ func run(ctx context.Context, getenv func(string) string, out io.Writer) error {
 	defer airtelMoney.Wait()
 	airtelMoney.WithFaults(rules)
 
+	phones, err := phone.New(ctx, books, map[bank.Operator]phone.Operator{bank.MTN: momo, bank.Airtel: airtelMoney}, logger)
+	if err != nil {
+		return err
+	}
+
 	sweepCtx, stopSweep := context.WithCancel(ctx)
 	swept := make(chan struct{})
 	go func() {
@@ -78,7 +89,9 @@ func run(ctx context.Context, getenv func(string) string, out io.Writer) error {
 	srv := &http.Server{
 		Addr: address(getenv),
 		Handler: server.New(logger, version, books, momo.Routes, airtelMoney.Routes, func(mux *http.ServeMux) {
-			admin.Routes(mux, getenv("MBONGO_ADMIN_TOKEN"), books, momo, airtelMoney, rules, logger)
+			admin.Routes(mux, getenv("MBONGO_ADMIN_TOKEN"), books, momo, airtelMoney, rules, phones, logger)
+		}, func(mux *http.ServeMux) {
+			phones.Routes(ctx, mux)
 		}),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
@@ -123,4 +136,28 @@ func address(getenv func(string) string) string {
 		return ":" + port
 	}
 	return ":8080"
+}
+
+// autoCustomers reads MBONGO_AUTO_CUSTOMERS and MBONGO_AUTO_BALANCE: with the first true, any
+// number a call uses becomes a customer holding the second, 100000 XAF by default.
+func autoCustomers(getenv func(string) string, books *bank.Bank) error {
+	raw := getenv("MBONGO_AUTO_CUSTOMERS")
+	if raw == "" {
+		return nil
+	}
+	on, err := strconv.ParseBool(raw)
+	if err != nil {
+		return fmt.Errorf("MBONGO_AUTO_CUSTOMERS must be true or false, not %q", raw)
+	}
+	if !on {
+		return nil
+	}
+	balance := int64(100_000)
+	if raw := getenv("MBONGO_AUTO_BALANCE"); raw != "" {
+		if balance, err = money.Parse(raw, "XAF"); err != nil {
+			return fmt.Errorf("MBONGO_AUTO_BALANCE must be an amount in XAF, such as 100000, not %q", raw)
+		}
+	}
+	books.AutoCustomers(balance)
+	return nil
 }
