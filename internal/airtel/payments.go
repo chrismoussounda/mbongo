@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"math/rand/v2"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -48,6 +49,17 @@ func codesFor(kind string) codes {
 		return disbursementCodes
 	}
 	return collectionCodes
+}
+
+// congoNumber is an Airtel Congo line as the API takes it: 05 or 04 and seven digits, no 242.
+// Only such numbers become automatic customers; others stay unknown, as at Airtel.
+var congoNumber = regexp.MustCompile(`^0[45][0-9]{7}$`)
+
+func (s *Service) ensureCustomer(ctx context.Context, msisdn string) error {
+	if !congoNumber.MatchString(msisdn) {
+		return nil
+	}
+	return s.books.EnsureCustomer(ctx, bank.Airtel, msisdn, currency)
 }
 
 // amount takes a JSON number or a string, since clients send both.
@@ -111,6 +123,10 @@ func (s *Service) start(w http.ResponseWriter, r *http.Request, app App, kind st
 	}
 	p := payment{ClientID: app.ClientID, ID: in.Transaction.ID, Kind: kind, MSISDN: msisdn, Amount: value,
 		Reference: in.Reference}
+	if err := s.ensureCustomer(r.Context(), msisdn); err != nil {
+		s.internal(w, err)
+		return bank.Transaction{}, payment{}, false
+	}
 	t, err := s.record(r.Context(), &p, bank.Request{Kind: bankKind(kind), Operator: bank.Airtel,
 		Merchant: app.ClientID, Phone: msisdn, Amount: value, Currency: currency, ExternalID: in.Transaction.ID,
 		Window: approvalWindow}, nil)
@@ -427,6 +443,10 @@ func (s *Service) balance(w http.ResponseWriter, r *http.Request, app App) {
 // user answers Airtel's KYC lookup with placeholder names, since Mbongo keeps none.
 func (s *Service) user(w http.ResponseWriter, r *http.Request, _ App) {
 	msisdn := r.PathValue("msisdn")
+	if err := s.ensureCustomer(r.Context(), msisdn); err != nil {
+		s.internal(w, err)
+		return
+	}
 	_, err := s.books.FindAccount(r.Context(), bank.Airtel, bank.CustomerAccount, msisdn, currency)
 	if errors.Is(err, bank.ErrNotFound) {
 		fail(w, "", "User not found", map[string]any{})

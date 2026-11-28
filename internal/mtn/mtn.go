@@ -5,6 +5,7 @@ package mtn
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -185,4 +186,54 @@ func (s *Service) decide(ctx context.Context, user, ref string, f func(apiUser, 
 	}
 	s.notify(r)
 	return nil
+}
+
+const waitingRequests = `SELECT r.transaction_id, s.partner, r.payer_message
+	FROM mtn_requests r
+	JOIN transactions t ON t.id = r.transaction_id
+	JOIN mtn_api_users u ON u.id = r.api_user
+	JOIN mtn_subscriptions s ON s.key = u.subscription
+	WHERE r.operation = 'requesttopay' AND t.status = 'pending' AND t.expires_at > ?`
+
+// Prompts are the requests to pay waiting for the payer's yes, oldest first.
+func (s *Service) Prompts(ctx context.Context, phone string) ([]bank.Prompt, error) {
+	return s.books.PromptsFrom(ctx, waitingRequests+" AND r.party_id = ? ORDER BY t.created_at, t.id",
+		s.books.Clock().Now().UTC().Format(bank.TimeLayout), phone)
+}
+
+// Waiting is every number's prompts, oldest first.
+func (s *Service) Waiting(ctx context.Context) ([]bank.Prompt, error) {
+	return s.books.PromptsFrom(ctx, waitingRequests+" ORDER BY t.created_at, t.id",
+		s.books.Clock().Now().UTC().Format(bank.TimeLayout))
+}
+
+// Answer is the payer's yes or no to a request to pay, given by its bank transaction; it
+// also sends the callback.
+func (s *Service) Answer(ctx context.Context, transactionID string, approve bool) error {
+	var user, ref string
+	err := s.store.db.QueryRowContext(ctx, `SELECT api_user, reference_id FROM mtn_requests
+		WHERE transaction_id = ? AND operation = 'requesttopay'`, transactionID).Scan(&user, &ref)
+	if errors.Is(err, sql.ErrNoRows) {
+		return bank.ErrNotFound
+	}
+	if err != nil {
+		return err
+	}
+	if approve {
+		return s.Approve(ctx, user, ref)
+	}
+	return s.Refuse(ctx, user, ref)
+}
+
+// Describe is what the customer's phone shows about a transaction: the partner on the other
+// side and MTN's reference for it.
+func (s *Service) Describe(ctx context.Context, t bank.Transaction) (counterparty, ref string, err error) {
+	err = s.store.db.QueryRowContext(ctx, `SELECT s.partner FROM mtn_requests r
+		JOIN mtn_api_users u ON u.id = r.api_user
+		JOIN mtn_subscriptions s ON s.key = u.subscription
+		WHERE r.transaction_id = ?`, t.ID).Scan(&counterparty)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", "", bank.ErrNotFound
+	}
+	return counterparty, financialID(t.ID), err
 }

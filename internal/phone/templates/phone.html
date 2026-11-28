@@ -1,0 +1,140 @@
+{{define "phone"}}{{template "head" "Phone"}}
+<div class="device-page">
+<main class="phone" data-events="{{.URL}}/events">
+  <header class="status-bar">
+    <span class="tray">
+      <time data-clock>{{.Clock}}</time>
+      <button type="button" id="alerts" class="alerts" hidden aria-label="Turn on payment alerts">Alerts</button>
+    </span>
+    <span class="tray">
+      <span class="sims">
+        {{range .SIMs}}<span class="sim" title="SIM {{.Slot}}: {{.Operator}} {{.Number}}"><span class="bars" aria-hidden="true"><i></i><i></i><i></i><i></i></span>{{.Slot}}</span>{{end}}
+      </span>
+      <span class="battery" aria-hidden="true"><span class="battery-fill"></span><span class="battery-level">82</span></span>
+    </span>
+  </header>
+
+  <div class="screen" id="screen">
+    {{with .Notice.Text}}<p class="notice{{if $.Notice.Error}} error{{end}}" role="status">{{.}}</p>{{end}}
+
+    {{if .Messages}}{{template "messages" .}}
+    {{else if .Current}}{{template "wallet" .}}
+    {{else}}{{template "home" .}}{{end}}
+  </div>
+
+  <section id="prompt" data-tx="{{with .Prompt}}{{.ID}}{{end}}"
+    data-title="{{with .Prompt}}{{.Payee}} asks you to pay {{.Amount}}{{end}}" data-body="{{with .Prompt}}{{.SIM}}{{end}}">
+    {{with .Prompt}}
+    <div class="overlay">
+      <div class="ussd" role="dialog" aria-modal="true" aria-labelledby="prompt-text">
+        <p class="sim-label">{{.SIM}}</p>
+        <p id="prompt-text"><strong>{{.Payee}}</strong> asks you to pay <strong class="amount">{{.Amount}}</strong>.</p>
+        {{with .Message}}<p class="message">{{.}}</p>{{end}}
+        <p class="timer">
+          {{if .NoLimit}}No time limit
+          {{else}}Expires at {{clock .ExpiresAt}}, <span data-left="{{.SecondsLeft}}"></span>{{end}}
+        </p>
+        <form method="post" action="{{.Action}}">
+          <input type="hidden" name="app" value="{{$.App}}">
+          <div class="buttons">
+            <button name="action" value="approve" class="primary" autofocus>Approve</button>
+            <button name="action" value="refuse">Refuse</button>
+            <button name="action" value="ignore" class="link">Ignore</button>
+          </div>
+        </form>
+        {{if $.Waiting}}<p class="muted queue">{{$.Waiting}} more waiting after this one.</p>{{end}}
+      </div>
+    </div>
+    {{end}}
+  </section>
+
+  <nav class="home-bar"><a href="{{.URL}}" aria-label="Home screen"><span></span></a></nav>
+</main>
+<p class="below"><a href="/_mbongo/phone/">All phones</a></p>
+</div>
+<script src="/_mbongo/phone/static/phone.js"></script>
+{{template "foot"}}{{end}}
+
+{{define "home"}}
+<div class="home">
+  <p class="home-clock" data-clock>{{.Clock}}</p>
+  <div class="apps">
+    <a class="app" href="{{.URL}}?app=messages">
+      <span class="icon icon-messages" aria-hidden="true">✉</span>
+      <span>Messages</span>
+      {{if .Unread}}<span class="badge" aria-label="{{.Unread}} unread">{{.Unread}}</span>{{end}}
+    </a>
+    {{range .SIMs}}
+    <a class="app" href="{{$.URL}}?app={{.App}}">
+      <span class="icon icon-{{.Key}}" aria-hidden="true">{{if eq .Key "mtn"}}MoMo{{else}}airtel{{end}}</span>
+      <span>{{.Operator}}</span>
+      {{with .Approvals}}<span class="badge" aria-label="{{len .}} waiting">{{len .}}</span>{{end}}
+    </a>
+    {{end}}
+  </div>
+</div>
+{{end}}
+
+{{define "messages"}}
+<div class="app-screen">
+  {{with .Current}}
+  <header class="app-bar"><a href="{{$.URL}}?app=messages" aria-label="Back to messages">‹</a>{{template "avatar" .}}<h1>{{.Sender}}</h1><span class="muted">SIM {{.Slot}}</span></header>
+  {{with .Messages}}
+  <ol class="thread">
+    {{range .}}<li class="bubble{{if .Unread}} unread{{end}}"><p>{{.Body}}</p><time>{{.When}}</time></li>{{end}}
+  </ol>
+  {{else}}<p class="idle">No messages.</p>{{end}}
+  {{else}}
+  <header class="app-bar"><a href="{{.URL}}" aria-label="Home screen">‹</a><h1>Messages</h1></header>
+  <ul class="threads">
+    {{range .SIMs}}
+    <li><a href="{{$.URL}}?app=messages&amp;sim={{.Slot}}">
+      {{template "avatar" .}}
+      <span class="thread-text">
+        <span class="who">{{.Sender}} <span class="muted">SIM {{.Slot}}</span></span>
+        <span class="last">{{if .Last}}{{.Last}}{{else}}No messages{{end}}</span>
+      </span>
+      {{if .Unread}}<span class="badge">{{.Unread}}</span>{{end}}
+    </a></li>
+    {{end}}
+  </ul>
+  {{end}}
+</div>
+{{end}}
+
+{{define "wallet"}}
+{{with .Current}}
+<div class="app-screen">
+  <header class="app-bar"><a href="{{$.URL}}" aria-label="Home screen">‹</a><h1>{{.Operator}}</h1><span class="muted">{{.Number}}</span></header>
+  {{range .Wallets}}<p class="balance"><span class="muted">Balance</span> {{.Balance}}</p>{{end}}
+
+  <h2>Approvals</h2>
+  {{with .Approvals}}
+  <ul class="approvals">
+    {{range .}}
+    <li>
+      <span><strong>{{.Payee}}</strong> {{.Amount}}</span>
+      <form method="post" action="{{.Action}}"><input type="hidden" name="app" value="{{$.App}}"><button name="action" value="show" class="link">Open</button></form>
+    </li>
+    {{end}}
+  </ul>
+  {{else}}<p class="muted">Nothing waiting.</p>{{end}}
+
+  <h2>History</h2>
+  {{with .History}}
+  <ol class="history">
+    {{range .}}
+    <li>
+      <span class="what">{{.What}}</span>
+      <span class="amount {{if .Incoming}}in{{else}}out{{end}}">{{if .Incoming}}+{{else}}−{{end}}{{.Amount}}</span>
+      <span class="muted">{{.When}}</span>
+      <span class="state state-{{.State}}">{{.Status}}</span>
+    </li>
+    {{end}}
+  </ol>
+  {{else}}<p class="muted">Nothing yet.</p>{{end}}
+</div>
+{{end}}
+{{end}}
+
+{{define "avatar"}}<span class="avatar avatar-{{.Key}}" aria-hidden="true">{{if eq .Key "mtn"}}M{{else}}A{{end}}</span>{{end}}

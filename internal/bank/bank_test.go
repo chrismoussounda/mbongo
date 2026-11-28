@@ -347,3 +347,21 @@ func TestFundTopsUpFromTheMint(t *testing.T) {
 		t.Fatalf("unknown account: %v", err)
 	}
 }
+
+func TestRequestUsesTheWalletInItsCurrency(t *testing.T) {
+	f := setup(t)
+	f.merchant("shop", 0)
+	for _, cur := range []string{"EUR", "XAF", "XOF"} {
+		if _, err := f.bank.OpenCustomer(f.ctx, bank.MTN, "242061234567", cur, 0); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tx, err := f.request(bank.Collection, "ref-1", 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := f.bank.Account(f.ctx, tx.CustomerID)
+	if err != nil || c.Currency != "XAF" {
+		t.Fatalf("customer wallet %+v %v", c, err)
+	}
+}

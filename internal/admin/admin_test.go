@@ -21,6 +21,7 @@ import (
 	"github.com/chrismoussounda/mbongo/internal/clock"
 	"github.com/chrismoussounda/mbongo/internal/faults"
 	"github.com/chrismoussounda/mbongo/internal/mtn"
+	"github.com/chrismoussounda/mbongo/internal/phone"
 )
 
 const adminToken = "letmein"
@@ -29,6 +30,7 @@ type env struct {
 	t      *testing.T
 	server *httptest.Server
 	books  *bank.Bank
+	phones *phone.Service
 }
 
 func setup(t *testing.T, token string) *env {
@@ -56,8 +58,12 @@ func setup(t *testing.T, token string) *env {
 	mux := http.NewServeMux()
 	m.Routes(mux)
 	a.Routes(mux)
-	admin.Routes(mux, token, books, m, a, rules, logger)
-	e := &env{t: t, server: httptest.NewServer(mux), books: books}
+	phones, err := phone.New(ctx, books, map[bank.Operator]phone.Operator{bank.MTN: m, bank.Airtel: a}, logger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	admin.Routes(mux, token, books, m, a, rules, phones, logger)
+	e := &env{t: t, server: httptest.NewServer(mux), books: books, phones: phones}
 	t.Cleanup(func() { e.server.Close(); m.Wait(); a.Wait(); _ = books.Close() })
 	return e
 }
@@ -172,6 +178,34 @@ func TestBadInputs(t *testing.T) {
 		status, body := e.admin(c.path, c.body)
 		if msg, _ := body["error"].(string); status != http.StatusBadRequest || msg == "" || strings.Contains(msg, ":") {
 			t.Errorf("%s %v: %d %v", c.path, c.body, status, body)
+		}
+	}
+}
+
+func TestSecondSIMJoinsAnotherNumbersPhone(t *testing.T) {
+	e := setup(t, adminToken)
+	customer := func(body string) (int, map[string]any) {
+		t.Helper()
+		return e.admin("/_mbongo/customers", json.RawMessage(body))
+	}
+	if status, _ := customer(`{"operator":"mtn","phone":"242061234567","currency":"XAF"}`); status != http.StatusCreated {
+		t.Fatalf("first SIM: %d", status)
+	}
+	status, out := customer(`{"operator":"airtel","phone":"055000001","currency":"XAF","sameDeviceAs":"242061234567"}`)
+	if status != http.StatusCreated || out["sameDeviceAs"] != "242061234567" {
+		t.Fatalf("second SIM: %d %v", status, out)
+	}
+	status, out = customer(`{"operator":"airtel","phone":"055000002","currency":"XAF","sameDeviceAs":"242061234567"}`)
+	if status != http.StatusConflict || out["error"] != "that phone already holds two SIMs" {
+		t.Fatalf("third SIM: %d %v", status, out)
+	}
+	status, out = customer(`{"operator":"airtel","phone":"055000003","currency":"XAF","sameDeviceAs":"242069999999"}`)
+	if status != http.StatusBadRequest || !strings.Contains(out["error"].(string), "sameDeviceAs") {
+		t.Fatalf("unknown number: %d %v", status, out)
+	}
+	for _, n := range []string{"055000002", "055000003"} {
+		if w, _ := e.books.Wallets(context.Background(), bank.Airtel, n); len(w) != 0 {
+			t.Fatalf("a refused SIM opened a wallet: %s", n)
 		}
 	}
 }
